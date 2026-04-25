@@ -1,1 +1,27 @@
+-- ==========================================
+-- METHOD 2: METATABLE HOOK (CRASH-PROOF v2)
+-- ==========================================
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- Real Owner ka ID jo hum chura rahe hain
+local TARGET_OWNER_ID =  5258579647
+
+-- Modern aur Safe Hooking Method
+local oldIndex
+oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+    
+    -- checkcaller() ensure karta hai ki sirf Target Script ullu bane, asli game nahi!
+    if checkcaller() and self == LocalPlayer and key == "UserId" then
+        return TARGET_OWNER_ID -- Fake Owner ID return hoga
+    end
+    
+    -- Baaki sab normal chalne do bina kisi error ke
+    return oldIndex(self, key)
+end))
+
+-- [TESTING THE HIJACK]
+print("✅ ZAYN IDENTITY MASK ACTIVATED SUCCESSFULLY!")
+print("Script ko lag raha hai mera ID hai: " .. tostring(LocalPlayer.UserId))
 
