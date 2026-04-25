@@ -1,27 +1,2043 @@
--- ==========================================
--- METHOD 2: METATABLE HOOK (CRASH-PROOF v2)
--- ==========================================
+-- ============================================ --
+-- ZAYN CHAT - WR4ITH WARRIOR EDITION (V29.9)   --
+-- THEME: OBSIDIAN DARK & SOFT RELAXING PASTEL  --
+-- SECURITY: TITANGUARD V10 (WATCHDOG+SANDBOX)  --
+-- FIXES: GHOST CLAN REMOVAL, ANTI-SPOOF, CLEAN --
+-- ============================================ --
 
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
+-- 🛡️ DOUBLE EXECUTION / MEMORY LEAK FIX
+if getgenv().ZaynChatLoaded then
+    warn("Zayn Chat is already running!")
+    return
+end
+getgenv().ZaynChatLoaded = true
 
--- Real Owner ka ID jo hum chura rahe hain
-local TARGET_OWNER_ID =  5258579647
-
--- Modern aur Safe Hooking Method
-local oldIndex
-oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+(function()
+    local HttpService = game:GetService("HttpService")
+    local Players = game:GetService("Players")
+    local CoreGui = game:GetService("CoreGui")
+    local TweenService = game:GetService("TweenService")
+    local UserInputService = game:GetService("UserInputService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local RunService = game:GetService("RunService")
     
-    -- checkcaller() ensure karta hai ki sirf Target Script ullu bane, asli game nahi!
-    if checkcaller() and self == LocalPlayer and key == "UserId" then
-        return TARGET_OWNER_ID -- Fake Owner ID return hoga
+    local UI_PARENT = (gethui and gethui()) or CoreGui
+
+    local _SECURE_BYTES = {119, 131, 131, 127, 130, 73, 62, 62, 137, 112, 136, 125, 114, 119, 112, 131, 125, 116, 131, 134, 126, 129, 122, 60, 115, 116, 117, 112, 132, 123, 131, 60, 129, 131, 115, 113, 61, 112, 130, 120, 112, 60, 130, 126, 132, 131, 119, 116, 112, 130, 131, 64, 61, 117, 120, 129, 116, 113, 112, 130, 116, 115, 112, 131, 112, 113, 112, 130, 116, 61, 112, 127, 127, 62}
+    local function _d() local u=""; for _, b in ipairs(_SECURE_BYTES) do u=u..string.char(b-15) end return u end
+    
+    local FIREBASE_URL = _d()
+    local SERVER_ID = (game.JobId ~= "" and game.JobId:sub(1,8)) or tostring(game.PlaceId):sub(1,8)
+    local DB_PATH = "servers/" .. SERVER_ID .. "/messages"
+    
+    local CLAN_DB_PATH = "clans/"
+    local INVITE_DB_PATH = "invites/"
+    local USER_CLANS_DB_PATH = "user_clans/"
+    local BLACKLIST_DB_PATH = "blacklist/"
+    local TITLES_DB_PATH = "titles/"
+    
+    local myClans = {}
+    local activeClanChat = nil
+    local isChatMuted = false
+    local isBlacklisted = false
+
+    local currentTarget = nil
+    local currentTargetName = nil
+
+    local function markTarget(playerName)
+        if currentTarget then pcall(function() currentTarget:Destroy() end) end
+        currentTargetName = playerName
+        
+        local targetPlayer = Players:FindFirstChild(playerName)
+        if not targetPlayer then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p.Name:lower():find(playerName:lower()) or p.DisplayName:lower():find(playerName:lower()) then
+                    targetPlayer = p
+                    break
+                end
+            end
+        end
+
+        if targetPlayer and targetPlayer.Character then
+            local highlight = Instance.new("Highlight")
+            highlight.Name = "WR4ITH_Target"
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            highlight.FillTransparency = 0.5
+            highlight.Parent = targetPlayer.Character
+            currentTarget = highlight
+            
+            task.spawn(function()
+                while highlight and highlight.Parent do
+                    task.wait(2)
+                    if not targetPlayer.Parent then highlight:Destroy(); currentTargetName = nil end
+                end
+            end)
+        end
+    end
+
+    local function removeTarget()
+        if currentTarget then pcall(function() currentTarget:Destroy() end) end
+        currentTarget = nil
+        currentTargetName = nil
+    end
+
+    local function checkTamper(func)
+        if not func then return false end
+        if getgenv and (getgenv().Spy or getgenv().HttpSpy) then return true end
+        local s, isL, isC = pcall(function() return islclosure(func), iscclosure(func) end)
+        if s and isL and not isC then return true end
+        if debug and debug.info then
+            local s2, infoName = pcall(function() return debug.info(func, "n") end)
+            if s2 and (infoName == "hooked" or infoName == "detour") then return true end
+        end
+        return false
+    end
+
+    local function generateSignature(action, targetUid, timestamp)
+        local rawString = "ZAYN_WR4ITH_" .. tostring(timestamp) .. "_" .. action .. "_" .. tostring(targetUid)
+        local hash = 0
+        for i = 1, #rawString do hash = (hash * 31 + string.byte(rawString, i)) % 1000000007 end
+        return tostring(hash)
+    end
+
+    local function generateClanRoleSignature(clanName, targetUid, role)
+        local rawString = "ZAYN_CLAN_" .. clanName .. "_" .. tostring(targetUid) .. "_" .. role .. "_WR4ITH"
+        local hash = 0
+        for i = 1, #rawString do hash = (hash * 31 + string.byte(rawString, i)) % 1000000007 end
+        return tostring(hash)
+    end
+
+    local function generateTitleSignature(targetUid, titleText, titleColor)
+        local rawString = "ZAYN_TITLE_" .. tostring(targetUid) .. "_" .. titleText .. "_" .. titleColor .. "_WR4ITH"
+        local hash = 0
+        for i = 1, #rawString do hash = (hash * 31 + string.byte(rawString, i)) % 1000000007 end
+        return tostring(hash)
+    end
+
+    local SECRET_MESSAGE_SALT = "WR4ITH_V28_ANTI_EXPLOIT_9988"
+    local function generateMessageHash(uid, text, timestamp)
+        local rawString = tostring(uid) .. "_" .. tostring(text) .. "_" .. tostring(timestamp) .. "_" .. SECRET_MESSAGE_SALT
+        local hash = 0
+        for i = 1, #rawString do hash = (hash * 31 + string.byte(rawString, i)) % 1000000007 end
+        return tostring(hash)
+    end
+
+    local function getStrictIdentity(uid)
+        uid = tonumber(uid)
+        if not uid then return "Unknown", "Unknown" end
+        local s, info = pcall(function() return game:GetService("UserService"):GetUserInfosByUserIdsAsync({uid}) end)
+        if s and info and info[1] then return info[1].DisplayName, info[1].Username end
+        local s2, name = pcall(function() return Players:GetNameFromUserIdAsync(uid) end)
+        if s2 and name then return name, name end
+        return "User_"..tostring(uid):sub(1,4), "User_"..tostring(uid):sub(1,4)
+    end
+
+    local Player = Players.LocalPlayer
+
+    local _rawReq = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+    if not _rawReq then pcall(function() Player:Kick("🛡️ Error: Unsupported Executor!") end) return end
+    
+    if checkTamper(_rawReq) then pcall(function() Player:Kick("🛡️ Tampering Detected") end) return end
+
+    local function reqFunc(options)
+        if checkTamper(_rawReq) then
+            pcall(function() Player:Kick("🛡️ TITANGUARD V10: HttpSpy Hook Detected! Zayn Chat Locked.") end)
+            return {Success = false, Body = "null"}
+        end
+        local success, result = pcall(_rawReq, options)
+        if success then return result else return {Success = false, Body = "null"} end
+    end
+
+    -- 🔥 UNIVERSAL REAL ID DETECTOR (Anti-Impersonation)
+    local function fetchMyTrueIdentity()
+        local currentUserName = Player.Name
+        local s, realId = pcall(function() return Players:GetUserIdFromNameAsync(currentUserName) end)
+        if s and realId then
+            return tostring(realId)
+        end
+        return tostring(Player.UserId)
+    end
+
+    local myUserId = fetchMyTrueIdentity()
+    local myName, myUser = getStrictIdentity(myUserId)
+
+    local _internalOwners = {["10432865434"] = true}
+    local OWNER_IDS = setmetatable({}, { __index = function(_, k) return _internalOwners[k] end, __newindex = function() end, __metatable = "LOCKED" })
+    local _internalVips = {["MickeyGotBan"] = true}
+    local VIP_IDS = setmetatable({}, { __index = function(_, k) return _internalVips[k] end, __newindex = function() end, __metatable = "LOCKED" })
+    local _internalTitles = {}
+    local CUSTOM_TITLES = setmetatable({}, { __index = function(_, k) return _internalTitles[k] end, __newindex = function() end, __metatable = "LOCKED" })
+    
+    local isOwner = OWNER_IDS[myUserId] or false
+    local rawK1 = "ZAYN_"
+    local rawK2 = string.reverse("X99_NOITCETORP")
+    local SECURE_AUTH_KEY = rawK1 .. rawK2
+
+    local activeScriptUsers = {}
+    activeScriptUsers[myUserId] = {displayName = myName, name = myUser, lastSeen = os.time()}
+
+    local STICKER_LIST = {
+        "95112780943766", "90286953844894", "100722574482118", "108550928457595",
+        "111616336841381", "72793460663497", "97531898393056", "124047412639555",
+        "86402817297314", "108283809544243", "76757365751988", "134676873059671",
+        "130819442854007", "108796531608917", "87693756574279", "102923210652647",
+        "87410449404372", "15725480856", "11257388490", "16116414577",
+        "16007326492", "2097206021", "13948817339", "5717153489",
+        "9896661777", "13820023455", "107818013095782", "13699124309",
+        "17514106279", "37297911", "90518488492874", "70439907124750",
+        "138721634729987", "16505642289", "110113156464012", "110722235373253",
+        "85407192167743", "127600871692693", "98946997706325", "87239554144904",
+        "75030286063678", "83671542566237", "115062400395026", "136413255954959",
+        "91965007204396", "135700976643537", "74143981281416", "128965568153551",
+        "90357041968118", "106503865025496", "107949395268622"
+    }
+
+    task.spawn(function()
+        local bRes = reqFunc({Url = FIREBASE_URL .. BLACKLIST_DB_PATH .. myUserId .. ".json", Method = "GET"})
+        if bRes.Success and bRes.Body ~= "null" then isBlacklisted = true end
+        
+        while true do
+            pcall(function()
+                local oneDayAgo = os.time() - 86400
+                local res = reqFunc({ Url = FIREBASE_URL .. DB_PATH .. '.json?orderBy="timestamp"&endAt=' .. oneDayAgo, Method = "GET" })
+                if res.Success and res.Body and res.Body ~= "null" then
+                    local data = HttpService:JSONDecode(res.Body)
+                    for key, _ in pairs(data) do reqFunc({Url = FIREBASE_URL .. DB_PATH .. "/" .. key .. ".json", Method = "DELETE"}) end
+                end
+                
+                for uid, d in pairs(activeScriptUsers) do
+                    if uid ~= myUserId and (os.time() - (d.lastSeen or 0)) > 120 then
+                        activeScriptUsers[uid] = nil
+                    end
+                end
+            end)
+            task.wait(60)
+        end
+    end)
+
+    local function loadTitles()
+        task.spawn(function()
+            if not reqFunc then return end
+            local tRes = reqFunc({Url = FIREBASE_URL .. TITLES_DB_PATH .. ".json", Method = "GET"})
+            if tRes.Success and tRes.Body ~= "null" then
+                local s, parsedTitles = pcall(function() return HttpService:JSONDecode(tRes.Body) end)
+                if s and type(parsedTitles) == "table" then _internalTitles = parsedTitles end
+            end
+        end)
+    end
+    loadTitles()
+
+    local rgbHue, rgbSpeed, rgbConn = 0, 0.008, nil
+    local function startUltraSmoothRgb()
+        if rgbConn then rgbConn:Disconnect() end
+        rgbConn = RunService.RenderStepped:Connect(function(deltaTime)
+            rgbHue = (rgbHue + rgbSpeed * math.min(deltaTime * 0.5, 0.1)) % 1
+            local rainbowColor = Color3.fromHSV(rgbHue, 0.4, 1)
+            local RE = ReplicatedStorage:FindFirstChild("RE")
+            if RE and RE:FindFirstChild("1RPNam1eColo1r") then pcall(function() RE["1RPNam1eColo1r"]:FireServer("PickingRPNameColor", rainbowColor); RE["1RPNam1eColo1r"]:FireServer("PickingRPBioColor", rainbowColor) end) end
+        end)
+    end
+    local function stopRgbAnimation() if rgbConn then rgbConn:Disconnect(); rgbConn = nil end end
+
+    local function setRPNameAndBio()
+        local RE = ReplicatedStorage:FindFirstChild("RE")
+        if RE and RE:FindFirstChild("1RPNam1eTex1t") then pcall(function() RE["1RPNam1eTex1t"]:FireServer("RolePlayName", "✿ ᴢᴀʏɴ ᴄʜᴀᴛ ✿"); RE["1RPNam1eTex1t"]:FireServer("RolePlayBio", "Welcome dear " .. myName) end) end
+        startUltraSmoothRgb()
+    end
+
+    local function getPlayerTitle(userId, playerName)
+        local uIdStr = tostring(userId)
+        if uIdStr == "10432865434" then return {text="CREATOR", color="RGB", expire=0} end
+        
+        local t = CUSTOM_TITLES[uIdStr]
+        if type(t) == "string" then t = {text=t, color="RGB", expire=0} end
+        
+        if t then 
+            if t.sig then
+                local expectedLocalSig = generateTitleSignature(uIdStr, t.text, t.color)
+                if t.sig ~= expectedLocalSig then return nil end
+            end
+            if t.expire > 0 and os.time() > t.expire then _internalTitles[uIdStr] = nil; return nil end 
+            return t
+        elseif OWNER_IDS[uIdStr] then return {text="CREATOR", color="RGB", expire=0}
+        elseif VIP_IDS[playerName] then return {text="VIP", color="NeonPink", expire=0} end 
+        return nil
+    end
+
+    local function getColorFromName(cName)
+        cName = cName:lower(); local cols = {red=Color3.fromRGB(255, 50, 50), blue=Color3.fromRGB(50, 150, 255), green=Color3.fromRGB(50, 255, 100), yellow=Color3.fromRGB(255, 220, 50), pink=Color3.fromRGB(255, 100, 200), purple=Color3.fromRGB(180, 50, 255), cyan=Color3.fromRGB(50, 255, 255), white=Color3.fromRGB(255, 255, 255)}; return cols[cName] or nil
+    end
+
+    local processedIds, clanProcessedIds = {}, {}
+    local isReceiving, hasSentJoin, messageCount, messageQueue, queueProcessing = false, false, 0, {}, false
+    local lastSendTime = 0
+    local MESSAGE_COOLDOWN = 1.5
+    local ignoreOldMessages = true
+    task.delay(4, function() ignoreOldMessages = false end)
+    local isInitialClanLoad = true
+    task.delay(4, function() isInitialClanLoad = false end)
+
+    local activeMessageFrames, currentTab = {}, "Server" 
+    local activeDmUserId, activeDmUserName = nil, nil
+    local dmHistories, serverReplyContext, dmReplyContext, clanReplyContext = {}, nil, nil, nil
+    local MAX_MESSAGES_ON_SCREEN = 150
+
+    local Colors = {
+        Primary = Color3.fromRGB(0, 150, 255), Secondary = Color3.fromRGB(180, 50, 255), 
+        Accent = Color3.fromRGB(0, 255, 170), Glow = Color3.fromRGB(0, 229, 255),
+        Dark = Color3.fromRGB(20, 20, 25), Darker = Color3.fromRGB(15, 15, 20), Light = Color3.fromRGB(240, 245, 255), Text = Color3.fromRGB(255, 255, 255),
+        TextDim = Color3.fromRGB(160, 160, 175), SystemYellow = Color3.fromRGB(255, 225, 100), NeonPink = Color3.fromRGB(255, 50, 150),
+        Cyan = Color3.fromRGB(0, 229, 255), RelaxingMint = Color3.fromRGB(168, 230, 207), Gold = Color3.fromRGB(255, 215, 0), AdminRed = Color3.fromRGB(255, 50, 50)
+    }
+
+    local function safeCall(func, ...) return pcall(func, ...) end
+    local function safeTween(obj, props, time, easing, dir)
+        if not obj or not obj.Parent then return nil end
+        local tInfo = TweenInfo.new(time, easing or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out)
+        local s, t = pcall(function() return TweenService:Create(obj, tInfo, props) end)
+        if s and t then t:Play(); return t end return nil
+    end
+    local function getNameColor(name)
+        local h = 0; for i = 1, #name do h = h + (string.byte(name, i) * 12) end return Color3.fromHSV((h % 360) / 360, 0.55, 1)
     end
     
-    -- Baaki sab normal chalne do bina kisi error ke
-    return oldIndex(self, key)
-end))
+    local function parseMessage(raw)
+        if not raw or raw == "" then return nil, nil, nil, nil end
+        raw = raw:gsub("^%s+", "")
+        
+        if raw:find("%[SYSTEM%]") then
+            local cleanSysMsg = raw:match("%[SYSTEM%]%s*:%s*([%s%S]*)%s*||") or raw:match("%[SYSTEM%]%s*:%s*([%s%S]*)")
+            if cleanSysMsg then return "[SYSTEM]", cleanSysMsg, nil, "[SYSTEM]" end
+        end
+        
+        local function extractSecureData(str)
+            local sMsg, sUID, sHash, sTS = str:match("^([%s%S]*)||%s*(%d+)::([%w_]+)::(%d+)%s*$")
+            if sMsg then sMsg = sMsg:gsub("%s+$", "") 
+            else sMsg, sUID = str:match("^([%s%S]*)||%s*(%d+)%s*$"); if sMsg then sMsg = sMsg:gsub("%s+$", "") end end
+            return sMsg, sUID, sHash, sTS
+        end
 
--- [TESTING THE HIJACK]
-print("✅ ZAYN IDENTITY MASK ACTIVATED SUCCESSFULLY!")
-print("Script ko lag raha hai mera ID hai: " .. tostring(LocalPlayer.UserId))
+        local titlePart, namePart, msgPart = raw:match("^%[([^%]]+)%]%s+([^:]+):%s*([%s%S]*)$")
+        if titlePart and namePart and msgPart then
+            if not titlePart:find("TITLE_") and not titlePart:find("SERVER_ANN") and not titlePart:find("JOIN") and not titlePart:find("ZAYN_SYNC") and not titlePart:find("CHAT_MUTE") and not titlePart:find("GBAN") then
+                local sMsg, sUID = extractSecureData(msgPart)
+                return "[" .. titlePart .. "] " .. namePart:gsub("^%s+", ""):gsub("%s+$", ""), sMsg or msgPart, sUID, namePart:gsub("^%s+", ""):gsub("%s+$", "")
+            end
+        end
+        
+        local namePart2, msgPart2 = raw:match("^([^:%[]+):%s*([%s%S]*)$")
+        if namePart2 and msgPart2 then
+            local sMsg, sUID = extractSecureData(msgPart2)
+            local pName = namePart2:gsub("^%s+", ""):gsub("%s+$", "")
+            return pName, sMsg or msgPart2, sUID, pName
+        end
+        return nil, nil, nil, nil
+    end
 
+    local isAnnouncing = false
+    local function showAnnouncement(msg, isServerWide)
+        if not announceFrame or isAnnouncing then return end
+        isAnnouncing = true
+        annText.Text = msg; annTitle.Text = isServerWide and "🌍 SERVER ANNOUNCEMENT" or "📢 LOCAL ANNOUNCEMENT"
+        annStroke.Color = isServerWide and Colors.NeonPink or Colors.Cyan
+        safeTween(announceFrame, {Position = UDim2.new(0.5, -230, 0, 40)}, 0.6, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        task.delay(7, function() safeTween(announceFrame, {Position = UDim2.new(0.5, -230, 0, -100)}, 0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.In); task.wait(0.6); isAnnouncing = false end)
+    end
+
+    local function createRadiantRGBTitle(parent, titleData)
+        local titleLabel = Instance.new("TextLabel", parent); titleLabel.BackgroundTransparency = 1; titleLabel.Text = "[" .. titleData.text .. "]"; titleLabel.Font = Enum.Font.GothamBlack; titleLabel.Size = UDim2.new(0, 0, 0, 15); titleLabel.AutomaticSize = Enum.AutomaticSize.X; titleLabel.TextSize = 12; titleLabel.TextYAlignment = Enum.TextYAlignment.Top
+        if titleData.color == "RGB" then
+            titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255); local gradient = Instance.new("UIGradient", titleLabel)
+            task.spawn(function()
+                local speed = 0.25
+                while titleLabel and titleLabel.Parent do
+                    local t = tick() * speed; local colors = {}
+                    for i = 0, 6 do local hue = (t + (i/6)) % 1; table.insert(colors, ColorSequenceKeypoint.new(i/6, Color3.fromHSV(hue, 0.4, 1))) end
+                    pcall(function() gradient.Color = ColorSequence.new(colors) end); task.wait(0.05)
+                end
+            end)
+        else local customColor = getColorFromName(titleData.color) or Colors.Primary; titleLabel.TextColor3 = customColor end
+        return titleLabel
+    end
+
+    local sg = Instance.new("ScreenGui"); sg.Name = HttpService:GenerateGUID(false); sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true
+    if syn and syn.protect_gui then pcall(function() syn.protect_gui(sg) end) end
+    sg.Parent = UI_PARENT
+
+    local main = Instance.new("Frame", sg); main.Size = UDim2.new(0, 355, 0, 310); main.AnchorPoint = Vector2.new(0.5, 0.5); main.Position = UDim2.new(0.5, 0, 0.5, 0); main.BackgroundColor3 = Colors.Darker; main.BackgroundTransparency = 0.15; main.BorderSizePixel = 0; main.ClipsDescendants = true
+    Instance.new("UICorner", main).CornerRadius = UDim.new(0, 16)
+
+    task.spawn(function()
+        local _originalSgParent = sg.Parent
+        while true do
+            task.wait(2)
+            if not sg or not sg.Parent or sg.Parent ~= _originalSgParent then
+                pcall(function() Player:Kick("🛡️ TITANGUARD V10: UI Tampering!") end); return
+            end
+            if not main or not main.Parent then
+                pcall(function() Player:Kick("🛡️ TITANGUARD V10: Core Tampering!") end); return
+            end
+        end
+    end)
+
+    local mainStroke = Instance.new("UIStroke", main); mainStroke.Thickness = 2; mainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    task.spawn(function() while mainStroke and mainStroke.Parent do safeCall(function() mainStroke.Color = Colors.Primary:Lerp(Colors.Secondary, (math.sin(tick() * 2) + 1) / 2) end); task.wait(0.04) end end)
+
+    local titleBar = Instance.new("Frame", main); titleBar.Size = UDim2.new(1, 0, 0, 42); titleBar.BackgroundTransparency = 1; titleBar.BorderSizePixel = 0
+    local titleLabel = Instance.new("TextLabel", titleBar); titleLabel.Size = UDim2.new(1, -75, 1, 0); titleLabel.Text = "ZAYN CHAT"; titleLabel.Font = Enum.Font.GothamBlack; titleLabel.TextSize = 16; titleLabel.TextColor3 = Colors.RelaxingMint; titleLabel.BackgroundTransparency = 1; titleLabel.TextXAlignment = Enum.TextXAlignment.Right
+    local clanTabBtn = Instance.new("TextButton", titleBar); clanTabBtn.Size = UDim2.new(0, 50, 0, 20); clanTabBtn.Position = UDim2.new(0, 10, 0.5, 0); clanTabBtn.AnchorPoint = Vector2.new(0, 0.5); clanTabBtn.Text = "🛡️ CLAN"; clanTabBtn.Font = Enum.Font.GothamBold; clanTabBtn.TextSize = 11; clanTabBtn.TextColor3 = Colors.Accent; clanTabBtn.BackgroundColor3 = Colors.Dark; clanTabBtn.BackgroundTransparency = 0.5; clanTabBtn.BorderSizePixel = 0; Instance.new("UICorner", clanTabBtn).CornerRadius = UDim.new(0, 6)
+    local serverTabBtn = Instance.new("TextButton", titleBar); serverTabBtn.Size = UDim2.new(0, 60, 0, 20); serverTabBtn.Position = UDim2.new(0, 65, 0.5, 0); serverTabBtn.AnchorPoint = Vector2.new(0, 0.5); serverTabBtn.Text = "🌍 SERVER"; serverTabBtn.Font = Enum.Font.GothamBold; serverTabBtn.TextSize = 11; serverTabBtn.TextColor3 = Colors.Primary; serverTabBtn.BackgroundColor3 = Colors.Dark; serverTabBtn.BackgroundTransparency = 0.5; serverTabBtn.BorderSizePixel = 0; Instance.new("UICorner", serverTabBtn).CornerRadius = UDim.new(0, 6)
+    local closeBtn = Instance.new("TextButton", titleBar); closeBtn.Size = UDim2.new(0, 28, 0, 28); closeBtn.Position = UDim2.new(1, -36, 0.5, -14); closeBtn.Text = "-"; closeBtn.TextColor3 = Colors.Text; closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 16; closeBtn.BackgroundColor3 = Colors.Dark; closeBtn.BackgroundTransparency = 0.2; closeBtn.BorderSizePixel = 0
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(1, 0)
+    local closeBtnStroke = Instance.new("UIStroke", closeBtn); closeBtnStroke.Color = Colors.TextDim; closeBtnStroke.Thickness = 1.2
+    
+    local contentFrame = Instance.new("Frame", main); contentFrame.Size = UDim2.new(1, 0, 1, -42); contentFrame.Position = UDim2.new(0, 0, 0, 42); contentFrame.BackgroundTransparency = 1
+
+    local chatFrame = Instance.new("ScrollingFrame", contentFrame); chatFrame.Size = UDim2.new(1, -22, 0, 200); chatFrame.Position = UDim2.new(0, 11, 0, 5); chatFrame.BackgroundTransparency = 1; chatFrame.BorderSizePixel = 0; chatFrame.ScrollBarThickness = 6; chatFrame.ScrollBarImageColor3 = Colors.Glow; chatFrame.ScrollBarImageTransparency = 0.2; chatFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y; chatFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+    Instance.new("UIPadding", chatFrame).PaddingLeft = UDim.new(0, 6); Instance.new("UIPadding", chatFrame).PaddingRight = UDim.new(0, 6)
+    local chatLayout = Instance.new("UIListLayout", chatFrame); chatLayout.SortOrder = Enum.SortOrder.LayoutOrder; chatLayout.Padding = UDim.new(0, 10)
+
+    local mentionMenu = Instance.new("ScrollingFrame", main)
+    mentionMenu.Size = UDim2.new(1, -22, 0, 100); mentionMenu.BackgroundColor3 = Colors.Darker; mentionMenu.BackgroundTransparency = 0.1; mentionMenu.BorderSizePixel = 0; mentionMenu.Visible = false; mentionMenu.ZIndex = 100; mentionMenu.ScrollBarThickness = 4; mentionMenu.ScrollBarImageColor3 = Colors.Primary
+    Instance.new("UICorner", mentionMenu).CornerRadius = UDim.new(0, 8); local mentionLayout = Instance.new("UIListLayout", mentionMenu)
+    
+    local function updateMentionMenu(box, offset)
+        local text = box.Text; local query = text:match("@([%w_]*)$")
+        if query then
+            for _, child in ipairs(mentionMenu:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+            local count = 0
+            for uid, data in pairs(activeScriptUsers) do
+                if uid ~= myUserId then
+                    if data.name:lower():sub(1, #query) == query:lower() or data.displayName:lower():sub(1, #query) == query:lower() then
+                        count = count + 1
+                        local btn = Instance.new("TextButton", mentionMenu); btn.Size = UDim2.new(1, 0, 0, 25); btn.BackgroundTransparency = 1; btn.Text = "  @" .. data.displayName; btn.TextColor3 = Colors.Light; btn.Font = Enum.Font.Gotham; btn.TextSize = 12; btn.TextXAlignment = Enum.TextXAlignment.Left; btn.ZIndex = 101
+                        btn.MouseButton1Click:Connect(function() box.Text = text:sub(1, #text - #query - 1) .. "@" .. data.displayName .. " "; mentionMenu.Visible = false; box:CaptureFocus() end)
+                    end
+                end
+            end
+            if count > 0 then
+                local frameHeight = math.min(count * 25, 100); mentionMenu.CanvasSize = UDim2.new(0, 0, 0, count * 25); mentionMenu.Size = UDim2.new(1, -22, 0, frameHeight); mentionMenu.Position = UDim2.new(0, 11, 1, offset - frameHeight); mentionMenu.Visible = true
+            else mentionMenu.Visible = false end
+        else mentionMenu.Visible = false end
+    end
+
+    local serverReplyBar = Instance.new("Frame", contentFrame); serverReplyBar.Size = UDim2.new(1, -22, 0, 25); serverReplyBar.Position = UDim2.new(0, 11, 1, -50); serverReplyBar.BackgroundColor3 = Colors.Dark; serverReplyBar.BackgroundTransparency = 0.2; serverReplyBar.BorderSizePixel = 0; serverReplyBar.Visible = false; serverReplyBar.ZIndex = 5; Instance.new("UICorner", serverReplyBar).CornerRadius = UDim.new(0, 6)
+    local srvReplyText = Instance.new("TextLabel", serverReplyBar); srvReplyText.Size = UDim2.new(1, -55, 1, 0); srvReplyText.Position = UDim2.new(0, 30, 0, 0); srvReplyText.Font = Enum.Font.Gotham; srvReplyText.TextSize = 11; srvReplyText.TextColor3 = Colors.TextDim; srvReplyText.BackgroundTransparency = 1; srvReplyText.TextXAlignment = Enum.TextXAlignment.Left; srvReplyText.TextTruncate = Enum.TextTruncate.AtEnd
+    local srvReplyCancel = Instance.new("TextButton", serverReplyBar); srvReplyCancel.Size = UDim2.new(0, 25, 1, 0); srvReplyCancel.Position = UDim2.new(1, -25, 0, 0); srvReplyCancel.Text = "✖"; srvReplyCancel.Font = Enum.Font.GothamBold; srvReplyCancel.TextSize = 12; srvReplyCancel.TextColor3 = Colors.TextDim; srvReplyCancel.BackgroundTransparency = 1
+
+    local function updateServerReplyState(name, msg)
+        if name and msg then
+            serverReplyContext = name .. ": " .. tostring(msg):gsub("%[STICKER:%d+%]", "[Sticker]"); srvReplyText.Text = "Replying to " .. serverReplyContext; serverReplyBar.Visible = true
+            safeTween(serverReplyBar, {Position = UDim2.new(0, 11, 1, -85)}, 0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        else
+            serverReplyContext = nil; local tw = safeTween(serverReplyBar, {Position = UDim2.new(0, 11, 1, -50)}, 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            if tw then tw.Completed:Connect(function() if not serverReplyContext then serverReplyBar.Visible = false end end) end
+        end
+    end
+    srvReplyCancel.MouseButton1Click:Connect(function() updateServerReplyState(nil, nil) end)
+
+    local stickerPanel = Instance.new("Frame", main); stickerPanel.Size = UDim2.new(1, -22, 0, 0); stickerPanel.Position = UDim2.new(0, 11, 1, -65); stickerPanel.AnchorPoint = Vector2.new(0, 1); stickerPanel.BackgroundColor3 = Colors.Dark; stickerPanel.BackgroundTransparency = 0.1; stickerPanel.BorderSizePixel = 0; stickerPanel.ClipsDescendants = true; stickerPanel.ZIndex = 50; Instance.new("UICorner", stickerPanel).CornerRadius = UDim.new(0, 14)
+    local stickerScroll = Instance.new("ScrollingFrame", stickerPanel); stickerScroll.Size = UDim2.new(1, -10, 1, -10); stickerScroll.Position = UDim2.new(0, 5, 0, 5); stickerScroll.BackgroundTransparency = 1; stickerScroll.BorderSizePixel = 0; stickerScroll.ScrollBarThickness = 3; stickerScroll.ScrollBarImageColor3 = Colors.Secondary; stickerScroll.ZIndex = 51
+    local stickerGrid = Instance.new("UIGridLayout", stickerScroll); stickerGrid.CellSize = UDim2.new(0, 50, 0, 50); stickerGrid.CellPadding = UDim2.new(0, 8, 0, 8); stickerGrid.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    
+    local isStickerPanelOpen, sendClanMessageFunc = false, nil
+
+    for _, id in ipairs(STICKER_LIST) do
+        local btn = Instance.new("ImageButton", stickerScroll); btn.BackgroundTransparency = 1; btn.ZIndex = 52
+        local thumbUrl = "rbxthumb://type=Asset&id=" .. id .. "&w=150&h=150"; btn.Image = thumbUrl; btn.HoverImage = thumbUrl
+        btn.MouseButton1Click:Connect(function()
+            safeTween(btn, {Size = UDim2.new(0, 45, 0, 45)}, 0.15, Enum.EasingStyle.Sine); task.wait(0.15); safeTween(btn, {Size = UDim2.new(0, 50, 0, 50)}, 0.15, Enum.EasingStyle.Sine)
+            isStickerPanelOpen = false; safeTween(stickerPanel, {Size = UDim2.new(1, -22, 0, 0)}, 0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+            if currentTab == "Server" then sendMsg("[STICKER:" .. id .. "]") 
+            elseif currentTab == "DMChat" and activeDmUserId then sendDmMsg("[STICKER:" .. id .. "]", activeDmUserId) 
+            elseif currentTab == "ClanChat" and activeClanChat and sendClanMessageFunc then sendClanMessageFunc("[STICKER:" .. id .. "]") end
+        end)
+    end
+    stickerScroll.CanvasSize = UDim2.new(0, 0, 0, math.ceil(#STICKER_LIST / 5) * 58)
+
+    local inputBg = Instance.new("Frame", contentFrame); inputBg.Size = UDim2.new(1, -20, 0, 40); inputBg.Position = UDim2.new(0, 10, 1, -50); inputBg.BackgroundColor3 = Colors.Dark; inputBg.BackgroundTransparency = 0.4; Instance.new("UICorner", inputBg).CornerRadius = UDim.new(0, 12)
+    local txtInput = Instance.new("TextBox", inputBg); txtInput.Size = UDim2.new(1, -90, 1, 0); txtInput.Position = UDim2.new(0, 10, 0, 0); txtInput.Text = ""; txtInput.PlaceholderText = "Type a message..."; txtInput.BackgroundTransparency = 1; txtInput.TextColor3 = Colors.TextDim; txtInput.TextSize = 12; txtInput.Font = Enum.Font.Gotham; txtInput.TextXAlignment = Enum.TextXAlignment.Left; txtInput.ClearTextOnFocus = false
+    local stickerBtn = Instance.new("TextButton", inputBg); stickerBtn.Size = UDim2.new(0, 34, 0, 34); stickerBtn.Position = UDim2.new(1, -80, 0.5, -17); stickerBtn.Text = "🌸"; stickerBtn.TextSize = 20; stickerBtn.BackgroundTransparency = 1
+    local sendBtn = Instance.new("TextButton", inputBg); sendBtn.Size = UDim2.new(0, 40, 0, 30); sendBtn.Position = UDim2.new(1, -45, 0.5, -15); sendBtn.Text = "▶"; sendBtn.TextColor3 = Colors.Light; sendBtn.Font = Enum.Font.GothamBold; sendBtn.TextSize = 16; sendBtn.BackgroundColor3 = Colors.Secondary; sendBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", sendBtn).CornerRadius = UDim.new(0, 8)
+
+    txtInput:GetPropertyChangedSignal("Text"):Connect(function() updateMentionMenu(txtInput, -55) end)
+
+    local dmChatContainer = Instance.new("Frame", main); dmChatContainer.Size = UDim2.new(1, 0, 1, -42); dmChatContainer.Position = UDim2.new(0, 0, 0, 42); dmChatContainer.BackgroundTransparency = 1; dmChatContainer.Visible = false
+    local dmTopBar = Instance.new("Frame", dmChatContainer); dmTopBar.Size = UDim2.new(1, -22, 0, 30); dmTopBar.Position = UDim2.new(0, 11, 0, 5); dmTopBar.BackgroundColor3 = Colors.Darker; dmTopBar.BackgroundTransparency = 0.3; dmTopBar.BorderSizePixel = 0; Instance.new("UICorner", dmTopBar).CornerRadius = UDim.new(0, 8)
+    local dmBackBtn = Instance.new("TextButton", dmTopBar); dmBackBtn.Size = UDim2.new(0, 50, 1, 0); dmBackBtn.Text = "< Back"; dmBackBtn.Font = Enum.Font.GothamBold; dmBackBtn.TextSize = 12; dmBackBtn.TextColor3 = Colors.Primary; dmBackBtn.BackgroundTransparency = 1
+    local dmChatTitle = Instance.new("TextLabel", dmTopBar); dmChatTitle.Size = UDim2.new(1, -60, 1, 0); dmChatTitle.Position = UDim2.new(0, 60, 0, 0); dmChatTitle.Text = "Chat"; dmChatTitle.Font = Enum.Font.GothamBlack; dmChatTitle.TextSize = 13; dmChatTitle.TextColor3 = Colors.Light; dmChatTitle.BackgroundTransparency = 1; dmChatTitle.TextXAlignment = Enum.TextXAlignment.Left
+    local dmChatFrame = Instance.new("ScrollingFrame", dmChatContainer); dmChatFrame.Size = UDim2.new(1, -22, 0, 170); dmChatFrame.Position = UDim2.new(0, 11, 0, 40); dmChatFrame.BackgroundTransparency = 1; dmChatFrame.BorderSizePixel = 0; dmChatFrame.ScrollBarThickness = 6; dmChatFrame.ScrollBarImageColor3 = Colors.NeonPink; dmChatFrame.ScrollBarImageTransparency = 0.3; dmChatFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y; dmChatFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+    Instance.new("UIPadding", dmChatFrame).PaddingLeft = UDim.new(0, 6); Instance.new("UIPadding", dmChatFrame).PaddingRight = UDim.new(0, 6)
+    local dmChatLayout = Instance.new("UIListLayout", dmChatFrame); dmChatLayout.SortOrder = Enum.SortOrder.LayoutOrder; dmChatLayout.Padding = UDim.new(0, 10)
+
+    local dmInputBox = Instance.new("TextBox", dmChatContainer); dmInputBox.Size = UDim2.new(1, -95, 0, 34); dmInputBox.Position = UDim2.new(0, 11, 1, -42); dmInputBox.Text = ""; dmInputBox.PlaceholderText = "Type message..."; dmInputBox.BackgroundColor3 = Colors.Dark; dmInputBox.BackgroundTransparency = 0.5; dmInputBox.TextColor3 = Colors.Text; dmInputBox.TextSize = 12; dmInputBox.Font = Enum.Font.Gotham; dmInputBox.ClearTextOnFocus = false; dmInputBox.BorderSizePixel = 0; dmInputBox.ZIndex = 10; Instance.new("UICorner", dmInputBox).CornerRadius = UDim.new(0, 14)
+    local dmStickerBtn = Instance.new("TextButton", dmChatContainer); dmStickerBtn.Size = UDim2.new(0, 34, 0, 34); dmStickerBtn.Position = UDim2.new(1, -80, 1, -42); dmStickerBtn.Text = "🌸"; dmStickerBtn.TextSize = 20; dmStickerBtn.TextColor3 = Colors.Light; dmStickerBtn.BackgroundColor3 = Colors.Dark; dmStickerBtn.BackgroundTransparency = 0.4; dmStickerBtn.BorderSizePixel = 0; dmStickerBtn.ZIndex = 10; Instance.new("UICorner", dmStickerBtn).CornerRadius = UDim.new(0, 12)
+    local dmSendBtn = Instance.new("TextButton", dmChatContainer); dmSendBtn.Size = UDim2.new(0, 34, 0, 34); dmSendBtn.Position = UDim2.new(1, -40, 1, -42); dmSendBtn.Text = "▶"; dmSendBtn.TextColor3 = Colors.Light; dmSendBtn.Font = Enum.Font.GothamBold; dmSendBtn.TextSize = 16; dmSendBtn.BackgroundColor3 = Colors.Primary; dmSendBtn.BackgroundTransparency = 0.3; dmSendBtn.BorderSizePixel = 0; Instance.new("UICorner", dmSendBtn).CornerRadius = UDim.new(0, 12)
+    dmInputBox:GetPropertyChangedSignal("Text"):Connect(function() updateMentionMenu(dmInputBox, -47) end)
+
+    local dmReplyBar = serverReplyBar:Clone(); dmReplyBar.Parent = dmChatContainer
+    local dmReplyText = dmReplyBar:FindFirstChildWhichIsA("TextLabel", true)
+    local dmReplyCancel = dmReplyBar:FindFirstChildWhichIsA("TextButton", true)
+    local function updateDmReplyState(name, msg)
+        if name and msg then
+            dmReplyContext = name .. ": " .. tostring(msg):gsub("%[STICKER:%d+%]", "[Sticker]"); dmReplyText.Text = "Replying to " .. dmReplyContext; dmReplyBar.Visible = true
+            safeTween(dmReplyBar, {Position = UDim2.new(0, 11, 1, -72)}, 0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        else
+            dmReplyContext = nil; local tw = safeTween(dmReplyBar, {Position = UDim2.new(0, 11, 1, -42)}, 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            if tw then tw.Completed:Connect(function() if not dmReplyContext then dmReplyBar.Visible = false end end) end
+        end
+    end
+    if dmReplyCancel then dmReplyCancel.MouseButton1Click:Connect(function() updateDmReplyState(nil, nil) end) end
+
+    local CUI = {}
+    CUI.clanContainer = Instance.new("Frame", main); CUI.clanContainer.Size = UDim2.new(1, 0, 1, -42); CUI.clanContainer.Position = UDim2.new(0, 0, 0, 42); CUI.clanContainer.BackgroundTransparency = 1; CUI.clanContainer.Visible = false
+    CUI.clanHomeFrame = Instance.new("Frame", CUI.clanContainer); CUI.clanHomeFrame.Size = UDim2.new(1, 0, 1, 0); CUI.clanHomeFrame.BackgroundTransparency = 1; CUI.clanHomeFrame.Visible = true
+    
+    CUI.createClanBtn = Instance.new("TextButton", CUI.clanHomeFrame); CUI.createClanBtn.Size = UDim2.new(0, 85, 0, 25); CUI.createClanBtn.Position = UDim2.new(0, 11, 0, 5); CUI.createClanBtn.Text = "+ CREATE"; CUI.createClanBtn.Font = Enum.Font.GothamBold; CUI.createClanBtn.TextSize = 10; CUI.createClanBtn.TextColor3 = Colors.Light; CUI.createClanBtn.BackgroundColor3 = Colors.Secondary; CUI.createClanBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", CUI.createClanBtn).CornerRadius = UDim.new(0, 6)
+    CUI.refreshClanBtn = Instance.new("TextButton", CUI.clanHomeFrame); CUI.refreshClanBtn.Size = UDim2.new(0, 80, 0, 25); CUI.refreshClanBtn.Position = UDim2.new(0.5, -40, 0, 5); CUI.refreshClanBtn.Text = "🔄 REFRESH"; CUI.refreshClanBtn.Font = Enum.Font.GothamBold; CUI.refreshClanBtn.TextSize = 10; CUI.refreshClanBtn.TextColor3 = Colors.Light; CUI.refreshClanBtn.BackgroundColor3 = Colors.Dark; CUI.refreshClanBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", CUI.refreshClanBtn).CornerRadius = UDim.new(0, 6)
+    CUI.viewReqBtn = Instance.new("TextButton", CUI.clanHomeFrame); CUI.viewReqBtn.Size = UDim2.new(0, 85, 0, 25); CUI.viewReqBtn.Position = UDim2.new(1, -96, 0, 5); CUI.viewReqBtn.Text = "📩 REQS"; CUI.viewReqBtn.Font = Enum.Font.GothamBold; CUI.viewReqBtn.TextSize = 10; CUI.viewReqBtn.TextColor3 = Colors.Text; CUI.viewReqBtn.BackgroundColor3 = Colors.Dark; CUI.viewReqBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", CUI.viewReqBtn).CornerRadius = UDim.new(0, 6)
+    
+    CUI.discoverBtn = Instance.new("TextButton", CUI.clanHomeFrame); CUI.discoverBtn.Size = UDim2.new(0.5, -14, 0, 25); CUI.discoverBtn.Position = UDim2.new(0, 11, 0, 35); CUI.discoverBtn.Text = "🌍 DISCOVER"; CUI.discoverBtn.Font = Enum.Font.GothamBold; CUI.discoverBtn.TextSize = 11; CUI.discoverBtn.TextColor3 = Colors.Accent; CUI.discoverBtn.BackgroundColor3 = Colors.Dark; CUI.discoverBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", CUI.discoverBtn).CornerRadius = UDim.new(0, 6)
+    CUI.lbBtn = Instance.new("TextButton", CUI.clanHomeFrame); CUI.lbBtn.Size = UDim2.new(0.5, -14, 0, 25); CUI.lbBtn.Position = UDim2.new(0.5, 3, 0, 35); CUI.lbBtn.Text = "🏆 LEADERBOARD"; CUI.lbBtn.Font = Enum.Font.GothamBold; CUI.lbBtn.TextSize = 10; CUI.lbBtn.TextColor3 = Colors.SystemYellow; CUI.lbBtn.BackgroundColor3 = Colors.Dark; CUI.lbBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", CUI.lbBtn).CornerRadius = UDim.new(0, 6)
+
+    CUI.clanListScroll = Instance.new("ScrollingFrame", CUI.clanHomeFrame); CUI.clanListScroll.Size = UDim2.new(1, -22, 1, -70); CUI.clanListScroll.Position = UDim2.new(0, 11, 0, 65); CUI.clanListScroll.BackgroundTransparency = 1; CUI.clanListScroll.BorderSizePixel = 0; CUI.clanListScroll.ScrollBarThickness = 4; CUI.clanListScroll.ScrollBarImageColor3 = Colors.Accent; CUI.clanListScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Instance.new("UIPadding", CUI.clanListScroll).PaddingTop = UDim.new(0, 4); Instance.new("UIPadding", CUI.clanListScroll).PaddingBottom = UDim.new(0, 15)
+    CUI.clanListLayout = Instance.new("UIListLayout", CUI.clanListScroll); CUI.clanListLayout.Padding = UDim.new(0, 12); CUI.clanListLayout.SortOrder = Enum.SortOrder.LayoutOrder; CUI.clanListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    local function showNotif(sender, msg, isDm, senderUid)
+        local n = Instance.new("Frame", sg); n.Size = UDim2.new(0, 280, 0, 65); n.Position = UDim2.new(1, 15, 1, -80); n.BackgroundColor3 = Colors.Darker; n.BackgroundTransparency = 0.25; n.BorderSizePixel = 0; n.ZIndex = 100; n.ClipsDescendants = true; Instance.new("UICorner", n).CornerRadius = UDim.new(0, 12)
+        local notifStroke = Instance.new("UIStroke", n); notifStroke.Color = isDm and Colors.NeonPink or Colors.Primary; notifStroke.Thickness = 1.5; notifStroke.Transparency = 0.2
+        
+        local hasAvatar = (senderUid and tonumber(senderUid)) ~= nil
+        local textMaxWidth = hasAvatar and -100 or -58
+
+        local t = Instance.new("TextLabel", n); t.Size = UDim2.new(1, textMaxWidth, 0, 22); t.Position = UDim2.new(0, 54, 0, 10); t.Text = sender; t.TextColor3 = Colors.Light; t.BackgroundTransparency = 1; t.Font = Enum.Font.GothamBold; t.TextSize = 12; t.TextXAlignment = Enum.TextXAlignment.Left
+        local cleanMsg = msg:gsub("%[STICKER:%d+%]", "🖼️ Sent a Sticker")
+        local m = Instance.new("TextLabel", n); m.Size = UDim2.new(1, textMaxWidth, 0, 28); m.Position = UDim2.new(0, 54, 0, 34); m.Text = cleanMsg; m.TextColor3 = Colors.TextDim; m.BackgroundTransparency = 1; m.Font = Enum.Font.Gotham; m.TextSize = 11; m.TextXAlignment = Enum.TextXAlignment.Left; m.TextWrapped = true
+        
+        if hasAvatar then
+            local pfp = Instance.new("ImageLabel", n)
+            pfp.Size = UDim2.new(0, 42, 0, 42)
+            pfp.Position = UDim2.new(1, -52, 0.5, -21)
+            pfp.BackgroundTransparency = 1
+            pfp.Image = "rbxthumb://type=AvatarHeadShot&id=" .. senderUid .. "&w=150&h=150"
+            Instance.new("UICorner", pfp).CornerRadius = UDim.new(1, 0)
+            pfp.ZIndex = 101
+        end
+
+        task.spawn(function() pcall(function() local sfx = Instance.new("Sound"); sfx.SoundId = "rbxassetid://4590662766"; sfx.Volume = 1; sfx.Parent = UI_PARENT; sfx:Play(); task.wait(2); sfx:Destroy() end) end)
+        safeTween(n, {Position = UDim2.new(1, -300, 1, -80)}, 0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        task.delay(4, function() if n then safeTween(n, {Position = UDim2.new(1, 15, 1, -80), BackgroundTransparency = 1}, 0.35, Enum.EasingStyle.Sine).Completed:Connect(function() safeCall(function() n:Destroy() end) end) end end)
+    end
+
+    local function applyRGBStroke(targetCard, isVip)
+        local glowFrame = Instance.new("Frame", targetCard)
+        glowFrame.Size = UDim2.new(1, 0, 1, 0)
+        glowFrame.BackgroundTransparency = 1
+        glowFrame.ZIndex = 10 
+        Instance.new("UICorner", glowFrame).CornerRadius = UDim.new(0, 8)
+        
+        local bGlow = Instance.new("UIStroke", glowFrame)
+        bGlow.Color = Color3.fromRGB(255, 255, 255)
+        bGlow.Thickness = 2.5
+        bGlow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        bGlow.Transparency = 0 
+        local uig = Instance.new("UIGradient", bGlow)
+        task.spawn(function()
+            local spd = 0.35
+            while targetCard and targetCard.Parent do
+                local t = tick() * spd
+                pcall(function() 
+                    if isVip then
+                        uig.Color = ColorSequence.new({
+                            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 215, 0)),
+                            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 100)),
+                            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 215, 0))
+                        })
+                    else
+                        uig.Color = ColorSequence.new({
+                            ColorSequenceKeypoint.new(0, Color3.fromHSV(t%1, 1, 1)),
+                            ColorSequenceKeypoint.new(1, Color3.fromHSV((t+0.5)%1, 1, 1))
+                        })
+                    end
+                end)
+                task.wait(0.04)
+            end
+        end)
+    end
+
+    local function refreshClanList()
+        for _, child in ipairs(CUI.clanListScroll:GetChildren()) do if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end end
+        local count = 0
+        for cName, role in pairs(myClans) do
+            count = count + 1
+            local card = Instance.new("Frame", CUI.clanListScroll); card.Size = UDim2.new(1, -8, 0, 45); card.BackgroundColor3 = Colors.Dark; card.BackgroundTransparency = 0.2; card.BorderSizePixel = 0; Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
+            
+            local title = Instance.new("TextLabel", card); title.Size = UDim2.new(1, -100, 1, 0); title.Position = UDim2.new(0, 10, 0, 0); title.RichText = true; title.Font = Enum.Font.GothamBold; title.TextSize = 14; title.TextColor3 = Colors.Light; title.BackgroundTransparency = 1; title.TextXAlignment = Enum.TextXAlignment.Left; title.ZIndex = 2
+            title.Text = "🛡️ " .. cName .. "\n<font size='10' color='#ffffff'>" .. role .. "</font>"
+
+            task.spawn(function()
+                if not reqFunc then return end
+                local clanRes = reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. ".json", Method = "GET"})
+                if clanRes.Success and clanRes.Body ~= "null" then
+                    local s, clanData = pcall(function() return HttpService:JSONDecode(clanRes.Body) end)
+                    if s and type(clanData) == "table" then
+                        if clanData.banner then
+                            card.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+                            local bannerImg = Instance.new("ImageLabel", card)
+                            bannerImg.Size = UDim2.new(1, 0, 1, 0)
+                            bannerImg.BackgroundTransparency = 1
+                            bannerImg.Image = "rbxthumb://type=Asset&id=" .. clanData.banner .. "&w=420&h=420"
+                            bannerImg.ImageTransparency = 0.6
+                            bannerImg.ScaleType = Enum.ScaleType.Crop
+                            Instance.new("UICorner", bannerImg).CornerRadius = UDim.new(0, 8)
+                            bannerImg.ZIndex = 0 
+                        end
+
+                        local isVip = clanData.vip == true or clanData.vip == "true"
+                        local verifiedIconId = clanData.verified
+                        
+                        if clanData.banner or clanData.glow == true or isVip then applyRGBStroke(card, isVip) end
+
+                        if verifiedIconId and verifiedIconId ~= "false" and verifiedIconId ~= true then
+                            local vIcon = Instance.new("ImageLabel", card)
+                            vIcon.Size = UDim2.new(0, 22, 0, 22)
+                            vIcon.Position = UDim2.new(0, 10, 0.5, -11)
+                            vIcon.BackgroundTransparency = 1
+                            vIcon.Image = "rbxthumb://type=Asset&id=" .. tostring(verifiedIconId) .. "&w=150&h=150"
+                            vIcon.ZIndex = 1
+                            title.Position = UDim2.new(0, 38, 0, 0); title.Size = UDim2.new(1, -128, 1, 0)
+                        end
+
+                        if isVip then
+                            task.spawn(function()
+                                local speed = 0.3
+                                while card and card.Parent do
+                                    local hue = (tick() * speed) % 1
+                                    local color = Color3.fromHSV(hue, 1, 1)
+                                    local r, g, b = math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255)
+                                    pcall(function() title.Text = "<b><font color='"..string.format("#%02X%02X%02X", r, g, b).."'>[VIP]</font></b> 🛡️ " .. cName .. "\n<font size='10' color='#ffffff'>" .. role .. "</font>" end)
+                                    task.wait(0.05)
+                                end
+                            end)
+                        else
+                            title.Text = "🛡️ " .. cName .. "\n<font size='10' color='#ffffff'>" .. role .. "</font>"
+                        end
+                    end
+                end
+            end)
+            
+            local chatBtn = Instance.new("TextButton", card); chatBtn.Size = UDim2.new(0, 40, 0, 25); chatBtn.Position = UDim2.new(1, -90, 0.5, -12); chatBtn.Text = "💬"; chatBtn.TextColor3 = Colors.Light; chatBtn.BackgroundColor3 = Colors.Primary; chatBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", chatBtn).CornerRadius = UDim.new(0, 6); chatBtn.ZIndex = 2
+            local leaveBtn = Instance.new("TextButton", card); leaveBtn.Size = UDim2.new(0, 40, 0, 25); leaveBtn.Position = UDim2.new(1, -45, 0.5, -12); leaveBtn.Text = "🚪"; leaveBtn.TextColor3 = Colors.Light; leaveBtn.BackgroundColor3 = Colors.NeonPink; leaveBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", leaveBtn).CornerRadius = UDim.new(0, 6); leaveBtn.ZIndex = 2
+            
+            chatBtn.MouseButton1Click:Connect(function() activeClanChat = cName; switchTab("ClanChat") end)
+            
+            leaveBtn.MouseButton1Click:Connect(function()
+                if role == "Owner" then
+                    local msgPayload = {text = "[SYSTEM] : ⚠️ Clan '"..cName.."' has been DISBANDED by the Owner!", timestamp = os.time()}
+                    if reqFunc then reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/messages.json", Method = "POST", Body = HttpService:JSONEncode(msgPayload)}) end
+                    task.spawn(function()
+                        if not reqFunc then return end
+                        local res = reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/members.json", Method = "GET"})
+                        if res.Success and res.Body ~= "null" then
+                            local s, members = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                            if s and type(members) == "table" then for mUid, _ in pairs(members) do reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. mUid .. "/" .. cName .. ".json", Method = "DELETE"}) end end
+                        end
+                        reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. ".json", Method = "DELETE"})
+                        myClans[cName] = nil; showNotif("🛡️ SYSTEM", cName .. " has been disbanded!", true); refreshClanList()
+                    end)
+                else
+                    task.spawn(function()
+                        local mRes = reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/members.json", Method = "GET"})
+                        local mCount = 0
+                        if mRes.Success and mRes.Body ~= "null" then
+                            local s, mems = pcall(function() return HttpService:JSONDecode(mRes.Body) end)
+                            if s and type(mems) == "table" then for _,_ in pairs(mems) do mCount = mCount + 1 end end
+                        end
+
+                        if mCount <= 1 then
+                            local msgPayload = {text = "[SYSTEM] : ⚠️ Clan '"..cName.."' was auto-deleted (0 members).", timestamp = os.time()}
+                            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/messages.json", Method = "POST", Body = HttpService:JSONEncode(msgPayload)})
+                            reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. myUserId .. "/" .. cName .. ".json", Method = "DELETE"})
+                            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. ".json", Method = "DELETE"})
+                            myClans[cName] = nil; showNotif("🛡️ SYSTEM", cName .. " auto-deleted!", true); refreshClanList()
+                        else
+                            local msgPayload = {text = "[SYSTEM] : 🚪 " .. myName .. " has left the clan.", timestamp = os.time()}
+                            if reqFunc then reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/messages.json", Method = "POST", Body = HttpService:JSONEncode(msgPayload)})
+                            reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. myUserId .. "/" .. cName .. ".json", Method = "DELETE"})
+                            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/members/" .. myUserId .. ".json", Method = "DELETE"}) end
+                            myClans[cName] = nil; showNotif("🛡️", "Left Clan: " .. cName, true); refreshClanList()
+                        end
+                    end)
+                end
+            end)
+        end
+        if count == 0 then
+            local emptyLbl = Instance.new("TextLabel", CUI.clanListScroll); emptyLbl.Size = UDim2.new(1, 0, 0, 30); emptyLbl.Text = "You haven't joined any clans yet."; emptyLbl.Font = Enum.Font.Gotham; emptyLbl.TextSize = 12; emptyLbl.TextColor3 = Colors.TextDim; emptyLbl.BackgroundTransparency = 1
+        end
+    end
+
+    CUI.refreshClanBtn.MouseButton1Click:Connect(function()
+        if not reqFunc then return end; CUI.refreshClanBtn.Text = "..."
+        task.spawn(function()
+            local res = reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. myUserId .. ".json", Method = "GET"})
+            if res.Success and res.Body ~= "null" then
+                local s, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                if s and type(data) == "table" then myClans = {}; for cName, cData in pairs(data) do myClans[cName] = cData.role or "Member" end end
+            end
+            refreshClanList(); CUI.refreshClanBtn.Text = "🔄 REFRESH"
+        end)
+    end)
+
+    CUI.clanReqFrame = Instance.new("Frame", CUI.clanContainer); CUI.clanReqFrame.Size = UDim2.new(1, 0, 1, 0); CUI.clanReqFrame.BackgroundTransparency = 1; CUI.clanReqFrame.Visible = false
+    local reqTopBar = dmTopBar:Clone(); reqTopBar.Parent = CUI.clanReqFrame; reqTopBar.Position = UDim2.new(0, 11, 0, 5)
+    local reqBackBtn = reqTopBar:FindFirstChildWhichIsA("TextButton"); reqBackBtn.Text = "< Back"
+    local reqTitle = reqTopBar:FindFirstChildWhichIsA("TextLabel"); reqTitle.Text = "Requests & Invites"
+    CUI.reqList = Instance.new("ScrollingFrame", CUI.clanReqFrame); CUI.reqList.Size = UDim2.new(1, -22, 1, -45); CUI.reqList.Position = UDim2.new(0, 11, 0, 40); CUI.reqList.BackgroundTransparency = 1; CUI.reqList.BorderSizePixel = 0; CUI.reqList.ScrollBarThickness = 4; CUI.reqList.ScrollBarImageColor3 = Colors.Accent; CUI.reqList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Instance.new("UIPadding", CUI.reqList).PaddingTop = UDim.new(0, 4); Instance.new("UIPadding", CUI.reqList).PaddingBottom = UDim.new(0, 15)
+    Instance.new("UIListLayout", CUI.reqList).Padding = UDim.new(0, 8); Instance.new("UIListLayout", CUI.reqList).SortOrder = Enum.SortOrder.LayoutOrder
+
+    CUI.clanDiscoverFrame = Instance.new("Frame", CUI.clanContainer); CUI.clanDiscoverFrame.Size = UDim2.new(1, 0, 1, 0); CUI.clanDiscoverFrame.BackgroundTransparency = 1; CUI.clanDiscoverFrame.Visible = false
+    local discTopBar = dmTopBar:Clone(); discTopBar.Parent = CUI.clanDiscoverFrame; discTopBar.Position = UDim2.new(0, 11, 0, 5)
+    local discBackBtn = discTopBar:FindFirstChildWhichIsA("TextButton"); discBackBtn.Text = "< Back"
+    local discTitle = discTopBar:FindFirstChildWhichIsA("TextLabel"); discTitle.Text = "Discover Clans"
+    
+    CUI.discSearchBox = Instance.new("TextBox", CUI.clanDiscoverFrame); CUI.discSearchBox.Size = UDim2.new(1, -22, 0, 26); CUI.discSearchBox.Position = UDim2.new(0, 11, 0, 40); CUI.discSearchBox.BackgroundColor3 = Colors.Dark; CUI.discSearchBox.TextColor3 = Colors.Text; CUI.discSearchBox.PlaceholderText = "🔍 Search Clan Name..."; CUI.discSearchBox.Font = Enum.Font.Gotham; CUI.discSearchBox.TextSize = 11; Instance.new("UICorner", CUI.discSearchBox).CornerRadius = UDim.new(0, 6)
+    
+    CUI.discList = Instance.new("ScrollingFrame", CUI.clanDiscoverFrame); CUI.discList.Size = UDim2.new(1, -22, 1, -75); CUI.discList.Position = UDim2.new(0, 11, 0, 70); CUI.discList.BackgroundTransparency = 1; CUI.discList.BorderSizePixel = 0; CUI.discList.ScrollBarThickness = 4; CUI.discList.ScrollBarImageColor3 = Colors.Cyan; CUI.discList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Instance.new("UIPadding", CUI.discList).PaddingTop = UDim.new(0, 4); Instance.new("UIPadding", CUI.discList).PaddingBottom = UDim.new(0, 15)
+    local discListLayout = Instance.new("UIListLayout", CUI.discList); discListLayout.Padding = UDim.new(0, 12); discListLayout.SortOrder = Enum.SortOrder.LayoutOrder; discListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    CUI.clanLbFrame = Instance.new("Frame", CUI.clanContainer); CUI.clanLbFrame.Size = UDim2.new(1, 0, 1, 0); CUI.clanLbFrame.BackgroundTransparency = 1; CUI.clanLbFrame.Visible = false
+    local lbTopBar = dmTopBar:Clone(); lbTopBar.Parent = CUI.clanLbFrame; lbTopBar.Position = UDim2.new(0, 11, 0, 5)
+    local lbBackBtn = lbTopBar:FindFirstChildWhichIsA("TextButton"); lbBackBtn.Text = "< Back"
+    local lbTitle = lbTopBar:FindFirstChildWhichIsA("TextLabel"); lbTitle.Text = "🏆 Top Clans Leaderboard"
+    CUI.lbList = Instance.new("ScrollingFrame", CUI.clanLbFrame); CUI.lbList.Size = UDim2.new(1, -22, 1, -45); CUI.lbList.Position = UDim2.new(0, 11, 0, 40); CUI.lbList.BackgroundTransparency = 1; CUI.lbList.BorderSizePixel = 0; CUI.lbList.ScrollBarThickness = 4; CUI.lbList.ScrollBarImageColor3 = Colors.SystemYellow; CUI.lbList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Instance.new("UIPadding", CUI.lbList).PaddingTop = UDim.new(0, 4); Instance.new("UIPadding", CUI.lbList).PaddingBottom = UDim.new(0, 15)
+    local lbListLayout = Instance.new("UIListLayout", CUI.lbList); lbListLayout.Padding = UDim.new(0, 8); lbListLayout.SortOrder = Enum.SortOrder.LayoutOrder; lbListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    CUI.discSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        local query = CUI.discSearchBox.Text:lower()
+        for _, card in ipairs(CUI.discList:GetChildren()) do if card:IsA("Frame") and card:FindFirstChild("ClanNameRef") then card.Visible = (card.ClanNameRef.Value:lower():find(query) ~= nil) end end
+    end)
+
+    CUI.clanChatUIFrame = Instance.new("Frame", CUI.clanContainer); CUI.clanChatUIFrame.Size = UDim2.new(1, 0, 1, 0); CUI.clanChatUIFrame.BackgroundTransparency = 1; CUI.clanChatUIFrame.Visible = false
+    local clanTopBar = dmTopBar:Clone(); clanTopBar.Parent = CUI.clanChatUIFrame; clanTopBar.Position = UDim2.new(0, 11, 0, 5)
+    local clanChatBackBtn = clanTopBar:FindFirstChildWhichIsA("TextButton"); clanChatBackBtn.Text = "< Back"
+    local clanChatTitleLabel = clanTopBar:FindFirstChildWhichIsA("TextLabel"); clanChatTitleLabel.Text = "Clan Chat"
+    
+    local viewMemBtn = Instance.new("TextButton", clanTopBar); viewMemBtn.Size = UDim2.new(0, 30, 1, 0); viewMemBtn.Position = UDim2.new(1, -30, 0, 0); viewMemBtn.Text = "👥"; viewMemBtn.Font = Enum.Font.GothamBold; viewMemBtn.TextSize = 14; viewMemBtn.TextColor3 = Colors.Light; viewMemBtn.BackgroundTransparency = 1
+    
+    local clanChatFrame = chatFrame:Clone(); clanChatFrame.Parent = CUI.clanChatUIFrame; clanChatFrame.Position = UDim2.new(0, 11, 0, 40); clanChatFrame.Size = UDim2.new(1, -22, 0, 170)
+    for _, v in ipairs(clanChatFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
+    local clanChatLayout = clanChatFrame:FindFirstChildWhichIsA("UIListLayout")
+    
+    local clanInputBg = inputBg:Clone(); clanInputBg.Parent = CUI.clanChatUIFrame
+    local clanInputBox = clanInputBg:FindFirstChildWhichIsA("TextBox"); clanInputBox.PlaceholderText = "Clan msg or /invite User"
+    clanInputBox:GetPropertyChangedSignal("Text"):Connect(function() updateMentionMenu(clanInputBox, -47) end)
+    
+    local clanSendBtn, clanStickerBtn = nil, nil
+    for _, child in ipairs(clanInputBg:GetChildren()) do
+        if child:IsA("TextButton") then if child.Text == "▶" then clanSendBtn = child elseif child.Text == "🌸" then clanStickerBtn = child end end
+    end
+
+    sendClanMessageFunc = function(txt)
+        if not activeClanChat then return end
+        txt = tostring(txt):gsub("^%s+", ""):gsub("%s+$", "")
+        if txt == "" then return end
+        if clanReplyContext and not txt:find("%[STICKER:") then 
+            txt = "↪️ [Replying to " .. clanReplyContext .. "]\n" .. txt
+            updateClanReplyState(nil, nil) 
+        end
+        
+        local ts = os.time()
+        local msgHash = generateMessageHash(myUserId, txt, ts)
+        local outTxt = myName .. ": " .. txt .. " ||" .. myUserId .. "::" .. msgHash .. "::" .. ts
+        
+        local msgPayload = {text = outTxt, timestamp = ts}
+        if reqFunc then 
+            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. "/messages.json", Method = "POST", Body = HttpService:JSONEncode(msgPayload)}) 
+        end
+        addMessageToChat(myName, txt, false, myUserId, "Clan")
+    end
+
+    if clanSendBtn then
+        clanSendBtn.MouseButton1Click:Connect(function()
+            if clanInputBox.Text and clanInputBox.Text:match("%S") then
+                local t = clanInputBox.Text; clanInputBox.Text = ""; sendClanMessageFunc(t); mentionMenu.Visible = false
+            end
+        end)
+    end
+
+    clanInputBox.FocusLost:Connect(function(enter)
+        if enter and clanInputBox.Text:match("%S") then
+            local t = clanInputBox.Text; clanInputBox.Text = ""; sendClanMessageFunc(t); mentionMenu.Visible = false
+        end
+    end)
+
+
+    local clanReplyBar = serverReplyBar:Clone(); clanReplyBar.Parent = CUI.clanChatUIFrame
+    local clanReplyText = clanReplyBar:FindFirstChildWhichIsA("TextLabel", true)
+    local clanReplyCancel = clanReplyBar:FindFirstChildWhichIsA("TextButton", true)
+    local function updateClanReplyState(name, msg)
+        if name and msg then
+            clanReplyContext = name .. ": " .. tostring(msg):gsub("%[STICKER:%d+%]", "[Sticker]"); clanReplyText.Text = "Replying to " .. clanReplyContext; clanReplyBar.Visible = true
+            safeTween(clanReplyBar, {Position = UDim2.new(0, 11, 1, -85)}, 0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        else
+            clanReplyContext = nil; local tw = safeTween(clanReplyBar, {Position = UDim2.new(0, 11, 1, -50)}, 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            if tw then tw.Completed:Connect(function() if not clanReplyContext then clanReplyBar.Visible = false end end) end
+        end
+    end
+    if clanReplyCancel then clanReplyCancel.MouseButton1Click:Connect(function() updateClanReplyState(nil, nil) end) end
+
+    CUI.clanMembersFrame = Instance.new("Frame", CUI.clanContainer); CUI.clanMembersFrame.Size = UDim2.new(1, 0, 1, 0); CUI.clanMembersFrame.BackgroundTransparency = 1; CUI.clanMembersFrame.Visible = false
+    local memTopBar = dmTopBar:Clone(); memTopBar.Parent = CUI.clanMembersFrame; memTopBar.Position = UDim2.new(0, 11, 0, 5)
+    local memBackBtn = memTopBar:FindFirstChildWhichIsA("TextButton"); memBackBtn.Text = "< Back"
+    local memTitle = memTopBar:FindFirstChildWhichIsA("TextLabel"); memTitle.Text = "Clan Members"
+    local memList = Instance.new("ScrollingFrame", CUI.clanMembersFrame); memList.Size = UDim2.new(1, -22, 1, -45); memList.Position = UDim2.new(0, 11, 0, 40); memList.BackgroundTransparency = 1; memList.BorderSizePixel = 0; memList.ScrollBarThickness = 4; memList.ScrollBarImageColor3 = Colors.Primary; memList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Instance.new("UIPadding", memList).PaddingTop = UDim.new(0, 4); Instance.new("UIPadding", memList).PaddingBottom = UDim.new(0, 15)
+    Instance.new("UIListLayout", memList).Padding = UDim.new(0, 8); Instance.new("UIListLayout", memList).SortOrder = Enum.SortOrder.LayoutOrder
+
+    local promoMenu = Instance.new("Frame", CUI.clanMembersFrame)
+    promoMenu.Size = UDim2.new(0, 140, 0, 115); promoMenu.BackgroundColor3 = Colors.Darker; promoMenu.Visible = false; promoMenu.ZIndex = 300
+    Instance.new("UICorner", promoMenu).CornerRadius = UDim.new(0, 8)
+    local pStroke = Instance.new("UIStroke", promoMenu); pStroke.Color = Colors.Accent; pStroke.Thickness = 1.5
+    local pLayout = Instance.new("UIListLayout", promoMenu); pLayout.Padding = UDim.new(0, 2); pLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    local function createPromoBtn(text, color, roleId, targetUid, targetName)
+        local btn = Instance.new("TextButton", promoMenu); btn.Size = UDim2.new(1, -10, 0, 25); btn.Text = text; btn.TextColor3 = color; btn.BackgroundColor3 = Colors.Dark; btn.Font = Enum.Font.GothamBold; btn.TextSize = 11; btn.ZIndex = 301; Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+        btn.MouseButton1Click:Connect(function()
+            promoMenu.Visible = false
+            local roleSig = generateClanRoleSignature(activeClanChat, targetUid, roleId)
+            local updatePayload = {role = roleId, sig = roleSig}
+            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. "/members/" .. targetUid .. ".json", Method = "PUT", Body = HttpService:JSONEncode(updatePayload)})
+            reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. targetUid .. "/" .. activeClanChat .. ".json", Method = "PUT", Body = HttpService:JSONEncode(updatePayload)})
+            
+            local actionWord = roleId == "Recruit" and "demoted to" or "promoted to"
+            local msgPayload = {text = "[SYSTEM] : ⭐ " .. targetName .. " has been " .. actionWord .. " " .. roleId .. "!", timestamp = os.time()}
+            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. "/messages.json", Method = "POST", Body = HttpService:JSONEncode(msgPayload)})
+            showNotif("🛡️ ADMIN", targetName .. " -> " .. roleId, true); loadClanMembers()
+        end)
+    end
+
+    function loadClanMembers()
+        for _, child in ipairs(memList:GetChildren()) do if child:IsA("Frame") then child:Destroy() end end
+        if not activeClanChat or not reqFunc then return end
+        promoMenu.Visible = false
+        memTitle.Text = "Fetching live status..."
+
+        task.spawn(function()
+            local res = reqFunc({ Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. '/members.json', Method = "GET" })
+            if res.Success and res.Body ~= "null" then
+                local members = HttpService:JSONDecode(res.Body)
+                local count = 0
+                local onlineCount = 0
+                local offlineCount = 0
+
+                for mUid, mData in pairs(members) do
+                    count = count + 1
+                    local mCard = Instance.new("Frame", memList); mCard.Size = UDim2.new(1, 0, 0, 35); mCard.BackgroundColor3 = Colors.Dark; mCard.BorderSizePixel = 0; Instance.new("UICorner", mCard).CornerRadius = UDim.new(0, 6)
+                    
+                    local mRole = mData.role or "Recruit"
+                    if mRole ~= "Recruit" then
+                        local expectedSig = generateClanRoleSignature(activeClanChat, mUid, mRole)
+                        if mData.sig ~= expectedSig then mRole = "Recruit" end
+                    end
+                    
+                    local isOnline = activeScriptUsers[tostring(mUid)] ~= nil
+                    if isOnline then onlineCount = onlineCount + 1 else offlineCount = offlineCount + 1 end
+                    
+                    local statusDot = isOnline and "🟢" or "🔴"
+
+                    local pName = mUid == myUserId and (myName.." (You)") or "Fetching..."
+                    local rColor = Colors.Light
+                    if mRole == "Owner" then rColor = Colors.SystemYellow elseif mRole == "Co-Owner" then rColor = Colors.Primary elseif mRole == "Admin" then rColor = Colors.AdminRed elseif mRole == "Warrior" then rColor = Colors.Secondary end
+
+                    local rHex = rColor:ToHex()
+                    local mLbl = Instance.new("TextLabel", mCard); mLbl.Size = UDim2.new(1, -75, 1, 0); mLbl.Position = UDim2.new(0, 10, 0, 0); 
+                    mLbl.RichText = true
+                    mLbl.Font = Enum.Font.Gotham; mLbl.TextSize = 11; mLbl.TextColor3 = Colors.Text; mLbl.BackgroundTransparency = 1; mLbl.TextXAlignment = Enum.TextXAlignment.Left
+                    mLbl.Text = statusDot .. " " .. pName .. " <font color='#" .. rHex .. "'>[" .. mRole .. "]</font>"
+                    
+                    task.spawn(function()
+                        if mUid ~= myUserId then
+                            if activeScriptUsers[tostring(mUid)] then
+                                pName = activeScriptUsers[tostring(mUid)].displayName
+                            else
+                                pName, _ = getStrictIdentity(mUid)
+                            end
+                            mLbl.Text = statusDot .. " " .. pName .. " <font color='#" .. rHex .. "'>[" .. mRole .. "]</font>"
+                        end
+                    end)
+
+                    if (myClans[activeClanChat] == "Owner" or myClans[activeClanChat] == "Co-Owner" or myClans[activeClanChat] == "Admin") and mRole ~= "Owner" and mUid ~= myUserId then
+                        local kickBtn = Instance.new("TextButton", mCard); kickBtn.Size = UDim2.new(0, 24, 0, 24); kickBtn.Position = UDim2.new(1, -30, 0.5, -12); kickBtn.Text = "✖"; kickBtn.TextColor3 = Colors.Light; kickBtn.BackgroundColor3 = Colors.NeonPink; kickBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", kickBtn).CornerRadius = UDim.new(0, 6)
+                        kickBtn.MouseButton1Click:Connect(function()
+                            local msgPayload = {text = "[SYSTEM] : 👢 " .. pName .. " has been KICKED from the clan.", timestamp = os.time()}
+                            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. "/messages.json", Method = "POST", Body = HttpService:JSONEncode(msgPayload)})
+                            reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. mUid .. "/" .. activeClanChat .. ".json", Method = "DELETE"})
+                            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. "/members/" .. mUid .. ".json", Method = "DELETE"})
+                            mCard:Destroy(); showNotif("🛡️ ADMIN", "Kicked " .. pName, true)
+                        end)
+
+                        if myClans[activeClanChat] == "Owner" or myClans[activeClanChat] == "Co-Owner" then
+                            local promBtn = Instance.new("TextButton", mCard); promBtn.Size = UDim2.new(0, 24, 0, 24); promBtn.Position = UDim2.new(1, -60, 0.5, -12); promBtn.Text = "⭐"; promBtn.TextColor3 = Colors.Light; promBtn.BackgroundColor3 = Colors.Accent; promBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", promBtn).CornerRadius = UDim.new(0, 6)
+                            promBtn.MouseButton1Click:Connect(function()
+                                for _, v in ipairs(promoMenu:GetChildren()) do if v:IsA("TextButton") or v:IsA("TextLabel") then v:Destroy() end end
+                                local pTitle = Instance.new("TextLabel", promoMenu); pTitle.Size = UDim2.new(1, 0, 0, 15); pTitle.Text = "Manage: " .. string.sub(pName, 1, 10); pTitle.TextColor3 = Colors.TextDim; pTitle.BackgroundTransparency = 1; pTitle.Font = Enum.Font.Gotham; pTitle.TextSize = 10; pTitle.ZIndex = 301
+                                
+                                createPromoBtn("⭐ Co-Owner", Colors.Primary, "Co-Owner", mUid, pName)
+                                createPromoBtn("⭐ Admin", Colors.AdminRed, "Admin", mUid, pName)
+                                createPromoBtn("⭐ Warrior", Colors.Secondary, "Warrior", mUid, pName)
+                                createPromoBtn("🔻 Demote", Colors.NeonPink, "Recruit", mUid, pName)
+                                
+                                promoMenu.Position = UDim2.new(0, promBtn.AbsolutePosition.X - main.AbsolutePosition.X - 145, 0, promBtn.AbsolutePosition.Y - main.AbsolutePosition.Y)
+                                promoMenu.Visible = not promoMenu.Visible
+                            end)
+                        end
+                    end
+                end
+                memTitle.Text = "Members (🟢 " .. onlineCount .. " | 🔴 " .. offlineCount .. ")"
+            end
+        end)
+    end
+
+    viewMemBtn.MouseButton1Click:Connect(function() switchTab("ClanMembers"); loadClanMembers() end)
+    memBackBtn.MouseButton1Click:Connect(function() switchTab("ClanChat") end)
+
+    local function createBubble(displayName, msg, targetPlayer)
+        if not targetPlayer or not targetPlayer.Character then return end
+        local head = targetPlayer.Character:FindFirstChild("Head") or targetPlayer.Character.PrimaryPart; if not head then return end
+        local cleanMsg = msg; local repMatch, restMsg = msg:match("^↪️ %[Replying to (.-)%]\n(.*)")
+        if repMatch then cleanMsg = restMsg end; if tostring(cleanMsg):match("^%[STICKER:(%d+)%]$") then cleanMsg = "[Sticker 🌸]" end
+        pcall(function() game:GetService("TextChatService"):DisplayBubble(targetPlayer.Character, cleanMsg) end)
+    end
+
+    local function getDisplayNameWithTitle(userId, playerName)
+        if tostring(userId) == "10432865434" then return "[CREATOR] " .. playerName end
+        
+        local customTitle = getPlayerTitle(userId, playerName)
+        if customTitle then return "[" .. customTitle.text .. "] " .. playerName elseif OWNER_IDS[tostring(userId)] then return "[CREATOR] " .. playerName elseif VIP_IDS[playerName] then return "[VIP] " .. playerName end return playerName
+    end
+
+    local function makeSwipeable(frame, senderName, messageText, contextType)
+        local startPos = nil
+        frame.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then startPos = input.Position end end)
+        frame.InputEnded:Connect(function(input)
+            if startPos and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - startPos
+                if math.abs(delta.X) > 30 and math.abs(delta.Y) < 20 then 
+                    if contextType == "DM" then updateDmReplyState(senderName, messageText) 
+                    elseif contextType == "Server" then updateServerReplyState(senderName, messageText)
+                    elseif contextType == "Clan" then updateClanReplyState(senderName, messageText) end 
+                end
+                startPos = nil
+            end
+        end)
+    end
+
+    function addMessageToChat(name, message, isSystem, userId, chatType)
+        messageCount = messageCount + 1
+        local targetFrame, targetLayout
+        if chatType == "DM" then targetFrame = dmChatFrame; targetLayout = dmChatLayout
+        elseif chatType == "Clan" then targetFrame = clanChatFrame; targetLayout = clanChatLayout
+        else targetFrame = chatFrame; targetLayout = chatLayout end
+
+        local masterContainer = Instance.new("Frame", targetFrame); masterContainer.Size = UDim2.new(1, 0, 0, 0); masterContainer.AutomaticSize = Enum.AutomaticSize.Y; masterContainer.BackgroundTransparency = 1; masterContainer.LayoutOrder = messageCount
+        local masterLayout = Instance.new("UIListLayout", masterContainer); masterLayout.FillDirection = Enum.FillDirection.Vertical; masterLayout.SortOrder = Enum.SortOrder.LayoutOrder; masterLayout.Padding = UDim.new(0, 2)
+        
+        local cleanName = name:gsub("^%[[^%]]+%]%s+", ""):gsub("^[👑💎]%s+", "")
+        local cleanMsgTxt = tostring(message)
+        
+        if userId and not isSystem then
+            local strictData = activeScriptUsers[tostring(userId)]
+            if strictData then
+                cleanName = strictData.displayName
+            end
+        end
+
+        local msgHash = cleanName .. "_" .. cleanMsgTxt:sub(1, 15)
+        if not isSystem then activeMessageFrames[msgHash] = masterContainer end
+
+        if isSystem then
+            local msgLabel = Instance.new("TextLabel", masterContainer); msgLabel.Size = UDim2.new(1, -10, 0, 0); msgLabel.AutomaticSize = Enum.AutomaticSize.Y; msgLabel.BackgroundTransparency = 1; msgLabel.Font = Enum.Font.GothamBlack; msgLabel.TextSize = 12; msgLabel.TextXAlignment = Enum.TextXAlignment.Left; msgLabel.TextWrapped = true; msgLabel.Text = "[SYSTEM] : " .. tostring(message); msgLabel.TextColor3 = Colors.SystemYellow
+        else
+            local color = (chatType == "DM") and (tostring(userId) == tostring(myUserId) and Colors.Cyan or Colors.NeonPink) or getNameColor(cleanName)
+            local replyCtx = nil
+            local titleData = nil
+            
+            if chatType ~= "DM" then
+                if userId then titleData = getPlayerTitle(userId, cleanName) 
+                else local tTxt = name:match("^%[([^%]]+)%]%s"); if tTxt then titleData = {text=tTxt, color="RGB", expire=0} end end
+                
+                if chatType == "Clan" and not titleData then
+                    if name:match("^%[OWNER%]") then titleData = {text="OWNER", color="yellow", expire=0} 
+                    elseif name:match("^%[CO%-OWNER%]") then titleData = {text="CO-OWNER", color="blue", expire=0} 
+                    elseif name:match("^%[ADMIN%]") then titleData = {text="ADMIN", color="red", expire=0} 
+                    elseif name:match("^%[WARRIOR%]") then titleData = {text="WARRIOR", color="purple", expire=0} end
+                end
+            end
+
+            local repMatch, restMsg = cleanMsgTxt:match("^↪️ %[Replying to (.-)%]\n(.*)")
+            if repMatch then replyCtx = repMatch; cleanMsgTxt = restMsg end
+            if replyCtx then
+                local replyBlock = Instance.new("Frame", masterContainer); replyBlock.Size = UDim2.new(1, 0, 0, 14); replyBlock.AutomaticSize = Enum.AutomaticSize.Y; replyBlock.BackgroundTransparency = 1; replyBlock.LayoutOrder = 1
+                local replyLine = Instance.new("Frame", replyBlock); replyLine.Size = UDim2.new(0, 2, 1, 0); replyLine.BackgroundColor3 = color; replyLine.BorderSizePixel = 0
+                local replyLabel = Instance.new("TextLabel", replyBlock); replyLabel.Size = UDim2.new(1, -12, 0, 0); replyLabel.Position = UDim2.new(0, 8, 0, 0); replyLabel.AutomaticSize = Enum.AutomaticSize.Y; replyLabel.BackgroundTransparency = 1; replyLabel.Text = replyCtx; replyLabel.Font = Enum.Font.Gotham; replyLabel.TextSize = 10; replyLabel.TextColor3 = Colors.TextDim; replyLabel.TextXAlignment = Enum.TextXAlignment.Left; replyLabel.TextWrapped = true
+            end
+
+            local isMentioned = false; local lowerMsg = cleanMsgTxt:lower()
+            if (lowerMsg:find("@" .. myName:lower()) or lowerMsg:find("@" .. myUser:lower())) and tostring(userId) ~= myUserId then isMentioned = true end
+
+            local rowFrame = Instance.new("Frame", masterContainer); rowFrame.BackgroundTransparency = 1; rowFrame.AutomaticSize = Enum.AutomaticSize.XY; rowFrame.Size = UDim2.new(1, 0, 0, 0); rowFrame.LayoutOrder = 2
+            local rowLayout = Instance.new("UIListLayout", rowFrame); rowLayout.FillDirection = Enum.FillDirection.Horizontal; rowLayout.Padding = UDim.new(0, 5); rowLayout.SortOrder = Enum.SortOrder.LayoutOrder; rowLayout.VerticalAlignment = Enum.VerticalAlignment.Top 
+            
+            if titleData then createRadiantRGBTitle(rowFrame, titleData) end
+
+            local nameLabel = Instance.new("TextButton", rowFrame); nameLabel.BackgroundTransparency = 1; nameLabel.Text = cleanName; nameLabel.Font = Enum.Font.GothamBlack; nameLabel.Size = UDim2.new(0, 0, 0, 15); nameLabel.TextSize = 12; nameLabel.TextColor3 = color; nameLabel.AutomaticSize = Enum.AutomaticSize.X; nameLabel.LayoutOrder = 1; nameLabel.Active = true; nameLabel.TextYAlignment = Enum.TextYAlignment.Top
+            nameLabel.MouseButton1Click:Connect(function() if chatType ~= "DM" and userId and tostring(userId) ~= myUserId then activeDmUserId = tonumber(userId); activeDmUserName = cleanName; if dmChatTitle then dmChatTitle.Text = "Chat with " .. activeDmUserName end; switchTab("DMChat") end end)
+            local colonLabel = Instance.new("TextLabel", rowFrame); colonLabel.BackgroundTransparency = 1; colonLabel.Text = ":"; colonLabel.Font = Enum.Font.GothamBold; colonLabel.Size = UDim2.new(0, 0, 0, 15); colonLabel.TextSize = 12; colonLabel.TextColor3 = Colors.TextDim; colonLabel.AutomaticSize = Enum.AutomaticSize.X; colonLabel.LayoutOrder = 2; colonLabel.TextYAlignment = Enum.TextYAlignment.Top
+            
+            local stickerId = tostring(cleanMsgTxt):match("^%[STICKER:(%d+)%]$")
+            if stickerId then
+                local sImg = Instance.new("ImageLabel", rowFrame); sImg.BackgroundTransparency = 1; sImg.Size = UDim2.new(0, 90, 0, 90); sImg.Image = "rbxthumb://type=Asset&id=" .. stickerId .. "&w=150&h=150"; sImg.LayoutOrder = 3
+            else
+                local msgTextLabel = Instance.new("TextLabel", rowFrame); msgTextLabel.BackgroundTransparency = 1; msgTextLabel.Text = tostring(cleanMsgTxt)
+                msgTextLabel.Font = isMentioned and Enum.Font.GothamBold or Enum.Font.Gotham; msgTextLabel.TextColor3 = isMentioned and Colors.Gold or Colors.Text
+                msgTextLabel.Size = UDim2.new(0, 195, 0, 15); msgTextLabel.TextSize = 12; msgTextLabel.AutomaticSize = Enum.AutomaticSize.Y; msgTextLabel.TextWrapped = true; msgTextLabel.TextXAlignment = Enum.TextXAlignment.Left; msgTextLabel.LayoutOrder = 3; msgTextLabel.TextYAlignment = Enum.TextYAlignment.Top
+                if isMentioned then task.spawn(function() local sfx = Instance.new("Sound"); sfx.SoundId = "rbxassetid://4590662766"; sfx.Volume = 1.5; sfx.Parent = UI_PARENT; sfx:Play(); task.wait(2); pcall(function() sfx:Destroy() end) end) end
+            end
+            
+            makeSwipeable(masterContainer, cleanName, cleanMsgTxt, chatType)
+        end
+        
+        task.spawn(function()
+            task.wait(0.1); local maxScroll = targetLayout.AbsoluteContentSize.Y - targetFrame.AbsoluteSize.Y + 15
+            if maxScroll > 0 then safeTween(targetFrame, {CanvasPosition = Vector2.new(0, maxScroll)}, 0.3, Enum.EasingStyle.Sine) end
+            local messages = {}; for _, child in ipairs(targetFrame:GetChildren()) do if child:IsA("Frame") then table.insert(messages, child) end end
+            if #messages > MAX_MESSAGES_ON_SCREEN then table.sort(messages, function(a, b) return a.LayoutOrder < b.LayoutOrder end); for i = 1, #messages - MAX_MESSAGES_ON_SCREEN do safeCall(function() messages[i]:Destroy() end) end end
+        end)
+    end
+
+    function processQueue()
+        if queueProcessing or not reqFunc then return end; queueProcessing = true
+        task.spawn(function()
+            while #messageQueue > 0 do
+                local msgData = messageQueue[1]
+                local s, r = pcall(function() return reqFunc({Url = FIREBASE_URL .. DB_PATH .. ".json", Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(msgData)}) end)
+                if s and r and r.Success then table.remove(messageQueue, 1) else task.wait(0.5) end; task.wait()
+            end
+            queueProcessing = false
+        end)
+    end
+
+    task.spawn(function()
+        while true do 
+            local ts = os.time()
+            local sig = generateSignature("SYNC", myUserId, ts)
+            table.insert(messageQueue, {text = "[ZAYN_SYNC] " .. ts .. ":" .. sig .. " ||" .. myUserId, timestamp = ts})
+            processQueue()
+            task.wait(45) 
+        end
+    end)
+
+    function sendMsg(txt)
+        txt = tostring(txt):gsub("^%s+", ""):gsub("%s+$", "")
+        if txt == "" then return end
+        
+        if isBlacklisted then showNotif("⛔ BANNED", "You are permanently banned from Zayn Chat.", true); return end
+        if isChatMuted and not isOwner then showNotif("🔇 MUTED", "Global chat is currently muted by Owner.", true); return end
+
+        if os.clock() - lastSendTime < MESSAGE_COOLDOWN then addMessageToChat("[SYSTEM]", "⚠️ Spam Detected! Please wait "..MESSAGE_COOLDOWN.." seconds.", true, nil, "Server"); return end
+        lastSendTime = os.clock()
+        if serverReplyContext and not txt:find("%[STICKER:") then txt = "↪️ [Replying to " .. serverReplyContext .. "]\n" .. txt; updateServerReplyState(nil, nil) end
+        
+        if txt:lower() == "/admincmds" then
+            if not isOwner then return end
+            addMessageToChat("[SYSTEM]", "👑 ZAYN ADMIN CMDS 👑\n/gban [User]\n/ungban [User]\n/mutechat\n/unmutechat\n/disband [ClanName]\n/say [Msg]\n/server [Msg]\n/title [User] [Color] [Days] [Title]\n/removetitle [User]\n/setbanner [ClanName] [ID]\n/removebanner [ClanName]\n/setglow [ClanName] [true/false]\n/removeglow [ClanName]\n/vipclan [ClanName]\n/unvipclan [ClanName]\n/verifyclan [ClanName] [ID]\n/unverifyclan [ClanName]", true, nil, "Server")
+            return
+        end
+
+        local function triggerClanSync(cName)
+            table.insert(messageQueue, {text = "["..SERVER_ID.."] [CLAN_UPDATE] " .. cName .. " ||" .. myUserId .. "_" .. SECURE_AUTH_KEY, timestamp = os.time()})
+            processQueue()
+        end
+
+        if txt:lower():sub(1,9) == "/vipclan " then
+            if not isOwner then return end
+            local cName = txt:sub(10):gsub("^%s+", ""):gsub("%s+$", "")
+            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/vip.json", Method = "PUT", Body = "true"})
+            addMessageToChat("[SYSTEM]", "💎 VIP Badge given to clan " .. cName, true, nil, "Server")
+            triggerClanSync(cName)
+            return
+        end
+        if txt:lower():sub(1,11) == "/unvipclan " then
+            if not isOwner then return end
+            local cName = txt:sub(12):gsub("^%s+", ""):gsub("%s+$", "")
+            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/vip.json", Method = "DELETE"})
+            addMessageToChat("[SYSTEM]", "❌ VIP Badge removed from clan " .. cName, true, nil, "Server")
+            triggerClanSync(cName)
+            return
+        end
+        if txt:lower():sub(1,12) == "/verifyclan " then
+            if not isOwner then return end
+            local args = {}
+            for w in txt:sub(13):gmatch("%S+") do table.insert(args, w) end
+            if #args >= 2 then
+                local cName = args[1]
+                local iconId = args[2]
+                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/verified.json", Method = "PUT", Body = HttpService:JSONEncode(iconId)})
+                addMessageToChat("[SYSTEM]", "✅ Custom Verified Icon set for clan " .. cName, true, nil, "Server")
+                triggerClanSync(cName)
+            else
+                addMessageToChat("[SYSTEM]", "Usage: /verifyclan [ClanName] [IconID]", true, nil, "Server")
+            end
+            return
+        end
+        if txt:lower():sub(1,14) == "/unverifyclan " then
+            if not isOwner then return end
+            local cName = txt:sub(15):gsub("^%s+", ""):gsub("%s+$", "")
+            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/verified.json", Method = "DELETE"})
+            addMessageToChat("[SYSTEM]", "❌ Verified Badge removed from clan " .. cName, true, nil, "Server")
+            triggerClanSync(cName)
+            return
+        end
+
+        if txt:lower():sub(1,9) == "/setglow " then
+            if not isOwner then return end
+            local args = {}
+            for w in txt:sub(10):gmatch("%S+") do table.insert(args, w) end
+            if #args >= 2 then
+                local cName = args[1]
+                local gState = args[2]:lower() == "true"
+                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/glow.json", Method = "PUT", Body = HttpService:JSONEncode(gState)})
+                addMessageToChat("[SYSTEM]", "✨ Premium RGB Glow set to " .. tostring(gState) .. " for clan " .. cName, true, nil, "Server")
+                triggerClanSync(cName)
+            else
+                addMessageToChat("[SYSTEM]", "Usage: /setglow [ClanName] [true/false]", true, nil, "Server")
+            end
+            return
+        end
+
+        if txt:lower():sub(1,12) == "/removeglow " then
+            if not isOwner then return end
+            local cName = txt:sub(13):match("^%s*(%S+)")
+            if cName then
+                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/glow.json", Method = "DELETE"})
+                addMessageToChat("[SYSTEM]", "✨ Premium RGB Glow REMOVED for clan " .. cName, true, nil, "Server")
+                triggerClanSync(cName)
+            end
+            return
+        end
+
+        if txt:lower():sub(1,11) == "/setbanner " then
+            if not isOwner then return end
+            local args = {}
+            for w in txt:sub(12):gmatch("%S+") do table.insert(args, w) end
+            if #args >= 2 then
+                local cName = args[1]
+                local bId = args[2]
+                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/banner.json", Method = "PUT", Body = HttpService:JSONEncode(bId)})
+                addMessageToChat("[SYSTEM]", "🔥 Premium Banner ID '"..bId.."' set for clan " .. cName, true, nil, "Server")
+                triggerClanSync(cName)
+            else
+                addMessageToChat("[SYSTEM]", "Usage: /setbanner [ClanName] [ImageID]", true, nil, "Server")
+            end
+            return
+        end
+
+        if txt:lower():sub(1,14) == "/removebanner " then
+            if not isOwner then return end
+            local cName = txt:sub(15):match("^%s*(%S+)")
+            if cName then
+                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/banner.json", Method = "DELETE"})
+                addMessageToChat("[SYSTEM]", "🔥 Premium Banner REMOVED for clan " .. cName, true, nil, "Server")
+                triggerClanSync(cName)
+            end
+            return
+        end
+
+        if txt:lower() == "/mutechat" then
+            if not isOwner then return end
+            table.insert(messageQueue, {text = "["..SERVER_ID.."] [CHAT_MUTE] true ||" .. myUserId .. "_" .. SECURE_AUTH_KEY, timestamp = os.time()})
+            processQueue(); return
+        end
+        if txt:lower() == "/unmutechat" then
+            if not isOwner then return end
+            table.insert(messageQueue, {text = "["..SERVER_ID.."] [CHAT_MUTE] false ||" .. myUserId .. "_" .. SECURE_AUTH_KEY, timestamp = os.time()})
+            processQueue(); return
+        end
+
+        if txt:lower():sub(1,6) == "/gban " then
+            if not isOwner then return end
+            local targetUser = txt:sub(7):gsub("^%s+", ""):gsub("%s+$", "")
+            local tgtUid = nil
+            for uid, d in pairs(activeScriptUsers) do if d.name:lower() == targetUser:lower() or d.displayName:lower() == targetUser:lower() then tgtUid = uid; break end end
+            if tgtUid then
+                reqFunc({Url = FIREBASE_URL .. BLACKLIST_DB_PATH .. tgtUid .. ".json", Method = "PUT", Body = HttpService:JSONEncode(true)})
+                table.insert(messageQueue, {text = "["..SERVER_ID.."] [GBAN] "..tgtUid.." ||" .. myUserId .. "_" .. SECURE_AUTH_KEY, timestamp = os.time()})
+                processQueue()
+                addMessageToChat("[SYSTEM]", "🔨 Globally Banned: " .. targetUser, true, nil, "Server")
+            else addMessageToChat("[SYSTEM]", "Player not found in active cache!", true, nil, "Server") end return
+        end
+
+        if txt:lower():sub(1,8) == "/ungban " then
+            if not isOwner then return end
+            local targetUser = txt:sub(9):gsub("^%s+", ""):gsub("%s+$", "")
+            local tgtUid = nil
+            for uid, d in pairs(activeScriptUsers) do if d.name:lower() == targetUser:lower() or d.displayName:lower() == targetUser:lower() then tgtUid = uid; break end end
+            if tgtUid then
+                reqFunc({Url = FIREBASE_URL .. BLACKLIST_DB_PATH .. tgtUid .. ".json", Method = "DELETE"})
+                addMessageToChat("[SYSTEM]", "✅ Unbanned: " .. targetUser, true, nil, "Server")
+            end return
+        end
+
+        if txt:lower():sub(1,9) == "/disband " then
+            if not isOwner then return end
+            local cName = txt:sub(10):gsub("^%s+", ""):gsub("%s+$", "")
+            task.spawn(function()
+                local res = reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. ".json?shallow=true", Method = "GET"})
+                if res.Success and res.Body ~= "null" then
+                    local mRes = reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/members.json", Method = "GET"})
+                    if mRes.Success and mRes.Body ~= "null" then local s2, members = pcall(function() return HttpService:JSONDecode(mRes.Body) end) if s2 and type(members)=="table" then for mUid, _ in pairs(members) do reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. mUid .. "/" .. cName .. ".json", Method = "DELETE"}) end end end
+                    reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. ".json", Method = "DELETE"})
+                    addMessageToChat("[SYSTEM]", "🚨 You Disbanded Clan: " .. cName, true, nil, "Server")
+                    triggerClanSync(cName)
+                else addMessageToChat("[SYSTEM]", "Clan not found!", true, nil, "Server") end
+            end) return
+        end
+
+        if txt:lower():sub(1, 7) == "/title " then
+            if not isOwner then return end
+            local args = {}
+            for word in txt:sub(8):gmatch("%S+") do table.insert(args, word) end
+            if #args >= 4 then
+                local tUser = args[1]; local tColor = args[2]; local tDays = tonumber(args[3]) or 0
+                local tTitle = txt:match("/title %S+ %S+ %d+ (.*)")
+                local tgtUid = nil
+                for uid, d in pairs(activeScriptUsers) do if d.name:lower() == tUser:lower() or d.displayName:lower() == tUser:lower() then tgtUid = uid; break end end
+                if tgtUid then
+                    local exp = tDays > 0 and (os.time() + (tDays * 86400)) or 0
+                    local localTitleSig = generateTitleSignature(tgtUid, tTitle, tColor)
+                    local titleData = {text = tTitle, color = tColor, expire = exp, sig = localTitleSig}
+                    
+                    reqFunc({Url = FIREBASE_URL .. TITLES_DB_PATH .. tgtUid .. ".json", Method = "PUT", Body = HttpService:JSONEncode(titleData)})
+                    
+                    table.insert(messageQueue, {text = "["..SERVER_ID.."] [SERVER_ANN] SYSTEM: Owner gave Title '"..tTitle.."' to "..tUser, timestamp = os.time()})
+                    processQueue()
+                    addMessageToChat("[SYSTEM]", "Gave Title '"..tTitle.."' to "..tUser, true, nil, "Server")
+                else 
+                    addMessageToChat("[SYSTEM]", "Player not found in active cache!", true, nil, "Server") 
+                end
+            end
+            return
+        end
+
+        if txt:lower():sub(1, 13) == "/removetitle " then
+            if not isOwner then return end
+            local tUser = txt:sub(14):match("^%s*(%S+)")
+            if tUser then
+                local tgtUid = nil
+                for uid, d in pairs(activeScriptUsers) do if d.name:lower() == tUser:lower() or d.displayName:lower() == tUser:lower() then tgtUid = uid; break end end
+                if tgtUid then
+                    reqFunc({Url = FIREBASE_URL .. TITLES_DB_PATH .. tgtUid .. ".json", Method = "DELETE"})
+                    
+                    table.insert(messageQueue, {text = "["..SERVER_ID.."] [SERVER_ANN] SYSTEM: Owner removed title from "..tUser, timestamp = os.time()})
+                    processQueue()
+                    addMessageToChat("[SYSTEM]", "Removed title from "..tUser, true, nil, "Server")
+                end
+            end
+            return
+        end
+
+        if txt:sub(1,5) == "/say " then if not isOwner then return end local msg = txt:sub(6); task.spawn(function() showAnnouncement(msg, false) end); addMessageToChat("[SYSTEM]", msg, true, nil, "Server"); table.insert(messageQueue, {text = "["..SERVER_ID.."] [SERVER_ANN] SYSTEM: " .. msg, timestamp = os.time()}); processQueue(); return end
+        if txt:sub(1,8) == "/server " then if not isOwner then return end local msg = txt:sub(9); task.spawn(function() showAnnouncement(msg, true) end); addMessageToChat("[SYSTEM]", "[SERVER]: " .. msg, true, nil, "Server"); table.insert(messageQueue, {text = "["..SERVER_ID.."] [SERVER_ANN] SYSTEM: [SERVER]: " .. msg, timestamp = os.time()}); processQueue(); return end
+        
+        local displayName = getDisplayNameWithTitle(myUserId, myName); createBubble(displayName, txt, Player); addMessageToChat(displayName, txt, false, myUserId, "Server")
+        
+        local ts = os.time()
+        local msgHash = generateMessageHash(myUserId, txt, ts)
+        local outTxt = displayName .. ": " .. txt .. " ||" .. myUserId .. "::" .. msgHash .. "::" .. ts
+        table.insert(messageQueue, {text = outTxt, timestamp = ts}); processQueue()
+    end
+
+    function sendDmMsg(txt, targetUid)
+        if isBlacklisted then return end
+        txt = tostring(txt):gsub("^%s+", ""):gsub("%s+$", "")
+        if txt == "" then return end
+        if dmReplyContext and not txt:find("%[STICKER:") then txt = "↪️ [Replying to " .. dmReplyContext .. "]\n" .. txt; updateDmReplyState(nil, nil) end
+        if not dmHistories[targetUid] then dmHistories[targetUid] = {} end
+        table.insert(dmHistories[targetUid], {name = myName, msg = txt, isSystem = false, uid = myUserId}); addMessageToChat(myName, txt, false, myUserId, "DM")
+        
+        local ts = os.time()
+        local msgHash = generateMessageHash(myUserId, txt, ts)
+        table.insert(messageQueue, {text = "[ZAYN_DM:"..tostring(targetUid).."] ["..SERVER_ID.."] " .. myName .. ": " .. txt .. " ||" .. tostring(myUserId) .. "::" .. msgHash .. "::" .. ts, timestamp = ts}); processQueue()
+    end
+
+    function loadDmHistory(targetUid) for _, child in ipairs(dmChatFrame:GetChildren()) do if child:IsA("Frame") then child:Destroy() end end; if not dmHistories[targetUid] then return end; for _, m in ipairs(dmHistories[targetUid]) do addMessageToChat(m.name, m.msg, m.isSystem, m.uid, "DM") end end
+
+    local function openStickerPanel()
+        isStickerPanelOpen = not isStickerPanelOpen
+        if isStickerPanelOpen then safeTween(stickerPanel, {Size = UDim2.new(1, -22, 0, 140)}, 0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out) 
+        else safeTween(stickerPanel, {Size = UDim2.new(1, -22, 0, 0)}, 0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out) end
+    end
+    stickerBtn.MouseButton1Click:Connect(openStickerPanel)
+    dmStickerBtn.MouseButton1Click:Connect(openStickerPanel)
+    if clanStickerBtn then clanStickerBtn.MouseButton1Click:Connect(openStickerPanel) end
+
+    sendBtn.MouseButton1Click:Connect(function() if txtInput.Text and txtInput.Text:match("%S") then local t = txtInput.Text; txtInput.Text = ""; sendMsg(t); mentionMenu.Visible = false end end)
+    txtInput.FocusLost:Connect(function(enter) if enter and txtInput.Text:match("%S") then local t = txtInput.Text; txtInput.Text = ""; sendMsg(t); mentionMenu.Visible = false end end)
+    dmSendBtn.MouseButton1Click:Connect(function() if dmInputBox.Text and dmInputBox.Text:match("%S") and activeDmUserId then local t = dmInputBox.Text; dmInputBox.Text = ""; sendDmMsg(t, activeDmUserId); mentionMenu.Visible = false end end)
+    dmInputBox.FocusLost:Connect(function(enter) if enter and dmInputBox.Text:match("%S") and activeDmUserId then local t = dmInputBox.Text; dmInputBox.Text = ""; sendDmMsg(t, activeDmUserId); mentionMenu.Visible = false end end)
+
+    local function loadClanRequests()
+        for _, child in ipairs(CUI.reqList:GetChildren()) do if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end end
+        local loadingLbl = Instance.new("TextLabel", CUI.reqList); loadingLbl.Size = UDim2.new(1, 0, 0, 30); loadingLbl.Text = "Fetching Requests..."; loadingLbl.Font = Enum.Font.Gotham; loadingLbl.TextSize = 12; loadingLbl.TextColor3 = Colors.TextDim; loadingLbl.BackgroundTransparency = 1
+        
+        task.spawn(function()
+            if not reqFunc then return end
+            
+            local count = 0
+            
+            local invRes = reqFunc({ Url = FIREBASE_URL .. INVITE_DB_PATH .. myUserId .. '.json', Method = "GET" })
+            if invRes.Success and invRes.Body ~= "null" then
+                local s, invites = pcall(function() return HttpService:JSONDecode(invRes.Body) end)
+                if s and type(invites) == "table" then
+                    for cName, iData in pairs(invites) do
+                        count = count + 1
+                        local rCard = Instance.new("Frame", CUI.reqList); rCard.Size = UDim2.new(1, -8, 0, 45); rCard.BackgroundColor3 = Colors.Dark; rCard.BorderSizePixel = 0; Instance.new("UICorner", rCard).CornerRadius = UDim.new(0, 6)
+                        
+                        local title = Instance.new("TextLabel", rCard); title.Size = UDim2.new(1, -90, 1, 0); title.Position = UDim2.new(0, 10, 0, 0); title.RichText = true; title.Font = Enum.Font.GothamBold; title.TextSize = 12; title.TextColor3 = Colors.SystemYellow; title.BackgroundTransparency = 1; title.TextXAlignment = Enum.TextXAlignment.Left
+                        title.Text = "📩 Invite: " .. cName .. "\n<font size='10' color='#a0a0af'>From: " .. (iData.from or "Admin") .. "</font>"
+                        
+                        local acceptBtn = Instance.new("TextButton", rCard); acceptBtn.Size = UDim2.new(0, 35, 0, 25); acceptBtn.Position = UDim2.new(1, -80, 0.5, -12); acceptBtn.Text = "✔"; acceptBtn.TextColor3 = Colors.Light; acceptBtn.BackgroundColor3 = Colors.Accent; acceptBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", acceptBtn).CornerRadius = UDim.new(0, 6)
+                        local declineBtn = Instance.new("TextButton", rCard); declineBtn.Size = UDim2.new(0, 35, 0, 25); declineBtn.Position = UDim2.new(1, -40, 0.5, -12); declineBtn.Text = "✖"; declineBtn.TextColor3 = Colors.Light; declineBtn.BackgroundColor3 = Colors.NeonPink; declineBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", declineBtn).CornerRadius = UDim.new(0, 6)
+                        
+                        acceptBtn.MouseButton1Click:Connect(function()
+                            local roleSig = generateClanRoleSignature(cName, myUserId, "Recruit")
+                            reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/members/" .. myUserId .. ".json", Method = "PUT", Body = HttpService:JSONEncode({role = "Recruit", sig = roleSig})})
+                            reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. myUserId .. "/" .. cName .. ".json", Method = "PUT", Body = HttpService:JSONEncode({role = "Recruit", sig = roleSig})})
+                            reqFunc({Url = FIREBASE_URL .. INVITE_DB_PATH .. myUserId .. "/" .. cName .. ".json", Method = "DELETE"})
+                            rCard:Destroy()
+                            showNotif("🛡️ CLAN", "Joined " .. cName, true)
+                            myClans[cName] = "Recruit"
+                        end)
+
+                        declineBtn.MouseButton1Click:Connect(function()
+                            reqFunc({Url = FIREBASE_URL .. INVITE_DB_PATH .. myUserId .. "/" .. cName .. ".json", Method = "DELETE"})
+                            rCard:Destroy()
+                        end)
+                    end
+                end
+            end
+
+            for cName, role in pairs(myClans) do
+                if role == "Owner" or role == "Co-Owner" or role == "Admin" then
+                    local reqRes = reqFunc({ Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. '/requests.json', Method = "GET" })
+                    if reqRes.Success and reqRes.Body ~= "null" then
+                        local s2, clanReqs = pcall(function() return HttpService:JSONDecode(reqRes.Body) end)
+                        if s2 and type(clanReqs) == "table" then
+                            for rUid, rData in pairs(clanReqs) do
+                                count = count + 1
+                                local rCard = Instance.new("Frame", CUI.reqList); rCard.Size = UDim2.new(1, -8, 0, 45); rCard.BackgroundColor3 = Colors.Dark; rCard.BorderSizePixel = 0; Instance.new("UICorner", rCard).CornerRadius = UDim.new(0, 6)
+                                
+                                local title = Instance.new("TextLabel", rCard); title.Size = UDim2.new(1, -90, 1, 0); title.Position = UDim2.new(0, 10, 0, 0); title.RichText = true; title.Font = Enum.Font.GothamBold; title.TextSize = 12; title.TextColor3 = Colors.Cyan; title.BackgroundTransparency = 1; title.TextXAlignment = Enum.TextXAlignment.Left
+                                title.Text = "🙋 Request: " .. cName .. "\n<font size='10' color='#a0a0af'>Player: " .. (rData.from or "Unknown") .. "</font>"
+                                
+                                local acceptBtn = Instance.new("TextButton", rCard); acceptBtn.Size = UDim2.new(0, 35, 0, 25); acceptBtn.Position = UDim2.new(1, -80, 0.5, -12); acceptBtn.Text = "✔"; acceptBtn.TextColor3 = Colors.Light; acceptBtn.BackgroundColor3 = Colors.Accent; acceptBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", acceptBtn).CornerRadius = UDim.new(0, 6)
+                                local declineBtn = Instance.new("TextButton", rCard); declineBtn.Size = UDim2.new(0, 35, 0, 25); declineBtn.Position = UDim2.new(1, -40, 0.5, -12); declineBtn.Text = "✖"; declineBtn.TextColor3 = Colors.Light; declineBtn.BackgroundColor3 = Colors.NeonPink; declineBtn.BackgroundTransparency = 0.2; Instance.new("UICorner", declineBtn).CornerRadius = UDim.new(0, 6)
+                                
+                                acceptBtn.MouseButton1Click:Connect(function()
+                                    local roleSig = generateClanRoleSignature(cName, rUid, "Recruit")
+                                    reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/members/" .. rUid .. ".json", Method = "PUT", Body = HttpService:JSONEncode({role = "Recruit", sig = roleSig})})
+                                    reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. rUid .. "/" .. cName .. ".json", Method = "PUT", Body = HttpService:JSONEncode({role = "Recruit", sig = roleSig})})
+                                    reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/requests/" .. rUid .. ".json", Method = "DELETE"})
+                                    rCard:Destroy()
+                                    showNotif("🛡️ CLAN", "Accepted " .. (rData.from or "Player"), true)
+                                end)
+
+                                declineBtn.MouseButton1Click:Connect(function()
+                                    reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/requests/" .. rUid .. ".json", Method = "DELETE"})
+                                    rCard:Destroy()
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+            
+            if loadingLbl then loadingLbl:Destroy() end
+            
+            if count == 0 then
+                local emptyLbl = Instance.new("TextLabel", CUI.reqList); emptyLbl.Size = UDim2.new(1, 0, 0, 30); emptyLbl.Text = "No pending requests."; emptyLbl.Font = Enum.Font.Gotham; emptyLbl.TextSize = 12; emptyLbl.TextColor3 = Colors.TextDim; emptyLbl.BackgroundTransparency = 1
+            else 
+                CUI.reqList.CanvasSize = UDim2.new(0, 0, 0, count * 55) 
+            end
+        end)
+    end
+
+    local function loadDiscoverClans()
+        for _, child in ipairs(CUI.discList:GetChildren()) do if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end end
+        local loadingLbl = Instance.new("TextLabel", CUI.discList); loadingLbl.Size = UDim2.new(1, 0, 0, 30); loadingLbl.Text = "Fetching Clans..."; loadingLbl.Font = Enum.Font.Gotham; loadingLbl.TextSize = 12; loadingLbl.TextColor3 = Colors.TextDim; loadingLbl.BackgroundTransparency = 1
+        
+        task.spawn(function()
+            if not reqFunc then return end
+            local res = reqFunc({ Url = FIREBASE_URL .. CLAN_DB_PATH .. '.json', Method = "GET" })
+            if loadingLbl then loadingLbl:Destroy() end
+            if res.Success and res.Body ~= "null" then
+                local s, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                if s and type(data) == "table" then
+                    local count = 0
+                    for cName, cData in pairs(data) do
+                        local memCount = 0; if cData.members and type(cData.members)=="table" then for _,_ in pairs(cData.members) do memCount = memCount + 1 end end
+                        
+                        -- 🔥 GHOST CLAN FILTER: Agar 0 players hain toh isko hide kar do
+                        if memCount == 0 then continue end
+
+                        count = count + 1
+                        local dCard = Instance.new("Frame", CUI.discList); dCard.Size = UDim2.new(1, -8, 0, 50); dCard.BackgroundColor3 = Colors.Dark; dCard.BorderSizePixel = 0; Instance.new("UICorner", dCard).CornerRadius = UDim.new(0, 6)
+                        
+                        local nameRef = Instance.new("StringValue", dCard); nameRef.Name = "ClanNameRef"; nameRef.Value = cName
+
+                        local ownerName = "Fetching..."
+
+                        if cData.banner then
+                            dCard.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+                            local bannerImg = Instance.new("ImageLabel", dCard); bannerImg.Size = UDim2.new(1, 0, 1, 0); bannerImg.BackgroundTransparency = 1; bannerImg.Image = "rbxthumb://type=Asset&id=" .. cData.banner .. "&w=420&h=420"; bannerImg.ImageTransparency = 0.6; bannerImg.ScaleType = Enum.ScaleType.Crop; Instance.new("UICorner", bannerImg).CornerRadius = UDim.new(0, 6); bannerImg.ZIndex = 0
+                        end
+
+                        local isVip = cData.vip == true or cData.vip == "true"
+                        if cData.banner or cData.glow == true or isVip then applyRGBStroke(dCard, isVip) end
+
+                        local title = Instance.new("TextLabel", dCard); title.Size = UDim2.new(1, -70, 1, 0); title.Position = UDim2.new(0, 10, 0, 0); title.RichText = true; title.Font = Enum.Font.GothamBold; title.TextSize = 13; title.TextColor3 = Colors.Light; title.BackgroundTransparency = 1; title.TextXAlignment = Enum.TextXAlignment.Left; title.ZIndex = 2
+                        
+                        local verifiedIconId = cData.verified
+                        if verifiedIconId and verifiedIconId ~= "false" and verifiedIconId ~= true then
+                            local vIcon = Instance.new("ImageLabel", dCard); vIcon.Size = UDim2.new(0, 22, 0, 22); vIcon.Position = UDim2.new(0, 10, 0.5, -11); vIcon.BackgroundTransparency = 1; vIcon.Image = "rbxthumb://type=Asset&id=" .. tostring(verifiedIconId) .. "&w=150&h=150"; vIcon.ZIndex = 1
+                            title.Position = UDim2.new(0, 38, 0, 0)
+                            title.Size = UDim2.new(1, -98, 1, 0)
+                        end
+                        
+                        local function getTitleText(oName)
+                            local prefix = "🛡️ "
+                            if isVip then prefix = "<b><font color='#ffd700'>[VIP]</font></b> 🛡️ " end
+                            return prefix .. cName .. "\n<font size='10' color='#a0a0af'>Owner: " .. oName .. "  |  👥 " .. memCount .. "</font>"
+                        end
+
+                        title.Text = getTitleText(ownerName)
+                        
+                        if cData.owner then
+                            task.spawn(function()
+                                task.wait(math.random(1, 15) / 10) 
+                                
+                                local sName, _ = getStrictIdentity(cData.owner)
+                                
+                                if not sName or sName == "Unknown" or sName:find("User_") then
+                                    ownerName = "🚫 [BANNED/INVALID]"
+                                else
+                                    ownerName = sName 
+                                end
+                                
+                                if tostring(cData.owner):find("SPOOFER_") then
+                                    ownerName = "🕵️ [FAKE ID DETECTED]"
+                                end
+                                
+                                if not isVip then 
+                                    pcall(function() title.Text = getTitleText(ownerName) end)
+                                end
+                            end)
+                        else
+                            ownerName = "🚫 [NO OWNER]"
+                            if not isVip then title.Text = getTitleText(ownerName) end
+                        end
+
+                        if isVip then
+                            task.spawn(function()
+                                local speed = 0.3
+                                while dCard and dCard.Parent do
+                                    local color = Color3.fromHSV((tick() * speed) % 1, 1, 1)
+                                    local hex = string.format("#%02X%02X%02X", color.R*255, color.G*255, color.B*255)
+                                    pcall(function() 
+                                        title.Text = "<b><font color='"..hex.."'>[VIP]</font></b> 🛡️ " .. cName .. "\n<font size='10' color='#a0a0af'>Owner: " .. ownerName .. "  |  👥 " .. memCount .. "</font>" 
+                                    end)
+                                    task.wait(0.05)
+                                end
+                            end)
+                        end
+
+                        local joinBtn = Instance.new("TextButton", dCard); joinBtn.Size = UDim2.new(0, 50, 0, 24); joinBtn.Position = UDim2.new(1, -60, 0.5, -12); joinBtn.Text = "JOIN"; joinBtn.Font = Enum.Font.GothamBold; joinBtn.TextColor3 = Colors.Light; joinBtn.BackgroundColor3 = Colors.Accent; joinBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", joinBtn).CornerRadius = UDim.new(0, 6); joinBtn.ZIndex = 2
+                        
+                        if myClans[cName] then
+                            joinBtn.Text = "✔"; joinBtn.BackgroundColor3 = Colors.Darker; joinBtn.TextColor3 = Colors.TextDim; joinBtn.Interactable = false
+                        else
+                            joinBtn.MouseButton1Click:Connect(function()
+                                joinBtn.Text = "SENT"; joinBtn.TextColor3 = Colors.Accent; joinBtn.Interactable = false
+                                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/requests/" .. myUserId .. ".json", Method = "PUT", Body = HttpService:JSONEncode({ from = myName, uid = myUserId, timestamp = os.time() })})
+                                showNotif("🛡️ CLAN", "Request sent to " .. cName, false)
+                            end)
+                        end
+                    end
+                    if count == 0 then
+                        local emptyLbl = Instance.new("TextLabel", CUI.discList); emptyLbl.Size = UDim2.new(1, 0, 0, 30); emptyLbl.Text = "No clans found."; emptyLbl.Font = Enum.Font.Gotham; emptyLbl.TextSize = 12; emptyLbl.TextColor3 = Colors.TextDim; emptyLbl.BackgroundTransparency = 1
+                    else CUI.discList.CanvasSize = UDim2.new(0, 0, 0, count * 58) end
+                end
+            end
+        end)
+    end
+
+
+    function switchTab(tabName) 
+        currentTab = tabName
+        contentFrame.Visible = (tabName == "Server")
+        dmChatContainer.Visible = (tabName == "DMChat")
+        CUI.clanContainer.Visible = (tabName == "ClanHome" or tabName == "ClanReqs" or tabName == "ClanChat" or tabName == "ClanDiscover" or tabName == "ClanMembers" or tabName == "ClanLeaderboard")
+        
+        CUI.clanHomeFrame.Visible = (tabName == "ClanHome")
+        CUI.clanReqFrame.Visible = (tabName == "ClanReqs")
+        CUI.clanDiscoverFrame.Visible = (tabName == "ClanDiscover")
+        CUI.clanLbFrame.Visible = (tabName == "ClanLeaderboard")
+        CUI.clanChatUIFrame.Visible = (tabName == "ClanChat")
+        CUI.clanMembersFrame.Visible = (tabName == "ClanMembers")
+
+        if tabName == "ClanHome" then
+            task.spawn(function()
+                if CUI.refreshClanBtn then CUI.refreshClanBtn.Text = "..." end
+                refreshClanList()
+                if CUI.refreshClanBtn then CUI.refreshClanBtn.Text = "🔄 REFRESH" end
+            end)
+        end
+        
+        if tabName == "ClanReqs" then loadClanRequests() end
+        if tabName == "ClanDiscover" then loadDiscoverClans() end
+
+        isStickerPanelOpen = false; safeTween(stickerPanel, {Size = UDim2.new(1, -22, 0, 0)}, 0.2); mentionMenu.Visible = false
+        if tabName ~= "ClanDiscover" and CUI.discSearchBox then CUI.discSearchBox.Text = "" end
+        
+        if tabName == "DMChat" then loadDmHistory(activeDmUserId) end
+        if tabName == "ClanChat" and activeClanChat and reqFunc then
+            clanChatTitleLabel.Text = "🛡️ " .. activeClanChat .. " [Lv. ?]"
+            for _, v in ipairs(clanChatFrame:GetChildren()) do if v:IsA("Frame") then v:Destroy() end end
+            task.spawn(function()
+                local xpRes = reqFunc({ Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. '/stats/xp.json', Method = "GET" })
+                if xpRes.Success and xpRes.Body ~= "null" then
+                    local xp = tonumber(xpRes.Body) or 0
+                    local lvl = math.floor(math.sqrt(xp / 10)) + 1
+                    clanChatTitleLabel.Text = "🛡️ " .. activeClanChat .. " <font color='#00FFaa'>[Lv. "..lvl.."]</font>"
+                    clanChatTitleLabel.RichText = true
+                end
+
+                local res = reqFunc({ Url = FIREBASE_URL .. CLAN_DB_PATH .. activeClanChat .. '/messages.json?orderBy="$key"&limitToLast=20', Method = "GET" })
+                if res.Success and res.Body ~= "null" then
+                    local s, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                    if s and type(data) == "table" then
+                        local sorted = {}
+                        for k, v in pairs(data) do table.insert(sorted, {k=k, v=v}) end
+                        table.sort(sorted, function(a, b) return a.v.timestamp < b.v.timestamp end)
+                        for _, msgObj in ipairs(sorted) do
+                            if msgObj.v.text:find("%[TARGET_MARK%]") or msgObj.v.text:find("%[TARGET_REMOVE%]") then continue end
+                            local sName, sMsg, sUID, cleanName = parseMessage(msgObj.v.text)
+                            if sName and sMsg then 
+                                local isSys = (sName == "[SYSTEM]")
+                                addMessageToChat(sName, sMsg, isSys, tonumber(sUID), "Clan") 
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    
+    dmBackBtn.MouseButton1Click:Connect(function() switchTab("Server") end)
+    reqBackBtn.MouseButton1Click:Connect(function() switchTab("ClanHome") end)
+    discBackBtn.MouseButton1Click:Connect(function() switchTab("ClanHome") end)
+    lbBackBtn.MouseButton1Click:Connect(function() switchTab("ClanHome") end)
+    clanChatBackBtn.MouseButton1Click:Connect(function() activeClanChat = nil; switchTab("ClanHome") end)
+    clanTabBtn.MouseButton1Click:Connect(function() switchTab("ClanHome") end)
+    serverTabBtn.MouseButton1Click:Connect(function() switchTab("Server") end)
+
+    CUI.viewReqBtn.MouseButton1Click:Connect(function() switchTab("ClanReqs") end)
+    CUI.discoverBtn.MouseButton1Click:Connect(function() switchTab("ClanDiscover") end)
+
+    CUI.lbBtn.MouseButton1Click:Connect(function()
+        if not reqFunc then return end
+        switchTab("ClanLeaderboard")
+        for _, child in ipairs(CUI.lbList:GetChildren()) do if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end end
+        local loadingLbl = Instance.new("TextLabel", CUI.lbList); loadingLbl.Size = UDim2.new(1, 0, 0, 30); loadingLbl.Text = "Fetching Leaderboard..."; loadingLbl.Font = Enum.Font.Gotham; loadingLbl.TextSize = 12; loadingLbl.TextColor3 = Colors.TextDim; loadingLbl.BackgroundTransparency = 1
+        
+        task.spawn(function()
+            local res = reqFunc({ Url = FIREBASE_URL .. CLAN_DB_PATH .. '.json', Method = "GET" })
+            if loadingLbl then loadingLbl:Destroy() end
+            if res.Success and res.Body ~= "null" then
+                local s, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                if s and type(data) == "table" then
+                    local clans = {}
+                    for cName, cData in pairs(data) do
+                        if type(cData) == "table" then
+                            local memCount = 0; if cData.members and type(cData.members)=="table" then for _,_ in pairs(cData.members) do memCount = memCount + 1 end end
+                            
+                            -- 🔥 GHOST CLAN FILTER: Leaderboard se bhi dead clans hatao
+                            if memCount > 0 then
+                                local xp = cData.stats and cData.stats.xp or 0
+                                table.insert(clans, {name = cName, xp = xp, data = cData, members = memCount})
+                            end
+                        end
+                    end
+                    table.sort(clans, function(a, b) return a.xp > b.xp end)
+                    
+                    local count = 0
+                    for i, clanInfo in ipairs(clans) do
+                        if i > 50 then break end
+                        count = count + 1
+                        local cName = clanInfo.name
+                        local cData = clanInfo.data
+                        local cXP = clanInfo.xp
+                        local memCount = clanInfo.members
+                        local cLvl = math.floor(math.sqrt(cXP / 10)) + 1
+                        
+                        local dCard = Instance.new("Frame", CUI.lbList); dCard.Size = UDim2.new(1, -8, 0, 50); dCard.BackgroundColor3 = Colors.Dark; dCard.BorderSizePixel = 0; Instance.new("UICorner", dCard).CornerRadius = UDim.new(0, 6)
+                        
+                        local rankColor = Colors.TextDim
+                        if i == 1 then rankColor = Colors.Gold elseif i == 2 then rankColor = Color3.fromRGB(192, 192, 192) elseif i == 3 then rankColor = Color3.fromRGB(205, 127, 50) end
+                        local rankLbl = Instance.new("TextLabel", dCard); rankLbl.Size = UDim2.new(0, 30, 1, 0); rankLbl.Position = UDim2.new(0, 5, 0, 0); rankLbl.Text = "#" .. i; rankLbl.Font = Enum.Font.GothamBlack; rankLbl.TextSize = 14; rankLbl.TextColor3 = rankColor; rankLbl.BackgroundTransparency = 1
+                        
+                        if cData.banner then
+                            dCard.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+                            local bannerImg = Instance.new("ImageLabel", dCard); bannerImg.Size = UDim2.new(1, 0, 1, 0); bannerImg.BackgroundTransparency = 1; bannerImg.Image = "rbxthumb://type=Asset&id=" .. cData.banner .. "&w=420&h=420"; bannerImg.ImageTransparency = 0.6; bannerImg.ScaleType = Enum.ScaleType.Crop; Instance.new("UICorner", bannerImg).CornerRadius = UDim.new(0, 6); bannerImg.ZIndex = 0
+                        end
+                        
+                        local isVip = cData.vip == true or cData.vip == "true"
+                        if cData.banner or cData.glow == true or isVip then applyRGBStroke(dCard, isVip) end
+
+                        local dLbl = Instance.new("TextLabel", dCard); dLbl.Size = UDim2.new(1, -120, 0, 20); dLbl.Position = UDim2.new(0, 40, 0, 5); dLbl.RichText = true; dLbl.Font = Enum.Font.GothamBold; dLbl.TextSize = 13; dLbl.TextColor3 = Colors.Light; dLbl.BackgroundTransparency = 1; dLbl.TextXAlignment = Enum.TextXAlignment.Left; dLbl.ZIndex = 2
+                        local infoLbl = Instance.new("TextLabel", dCard); infoLbl.Size = UDim2.new(1, -120, 0, 15); infoLbl.Position = UDim2.new(0, 40, 0, 25); infoLbl.Text = "⭐ XP: " .. cXP .. "  |  👥 " .. memCount; infoLbl.Font = Enum.Font.Gotham; infoLbl.TextSize = 10; infoLbl.TextColor3 = Colors.TextDim; infoLbl.BackgroundTransparency = 1; infoLbl.TextXAlignment = Enum.TextXAlignment.Left; infoLbl.ZIndex = 2
+                        
+                        local verifiedIconId = cData.verified
+                        if verifiedIconId and verifiedIconId ~= "false" and verifiedIconId ~= true then
+                            local vIcon = Instance.new("ImageLabel", dCard); vIcon.Size = UDim2.new(0, 20, 0, 20); vIcon.Position = UDim2.new(0, 40, 0, 5); vIcon.BackgroundTransparency = 1; vIcon.Image = "rbxthumb://type=Asset&id=" .. tostring(verifiedIconId) .. "&w=150&h=150"; vIcon.ZIndex = 1
+                            dLbl.Position = UDim2.new(0, 66, 0, 5); infoLbl.Position = UDim2.new(0, 66, 0, 25)
+                        end
+
+                        if isVip then
+                            task.spawn(function()
+                                local speed = 0.3
+                                while dCard and dCard.Parent do
+                                    local color = Color3.fromHSV((tick() * speed) % 1, 1, 1)
+                                    pcall(function() dLbl.Text = "<b><font color='"..string.format("#%02X%02X%02X", color.R*255, color.G*255, color.B*255).."'>[VIP]</font></b> " .. cName .. " <font color='#00FFaa'>[Lv."..cLvl.."]</font>" end)
+                                    task.wait(0.05)
+                                end
+                            end)
+                        else
+                            dLbl.Text = cName .. " <font color='#00FFaa'>[Lv."..cLvl.."]</font>"
+                        end
+
+                        local joinClanBtn = Instance.new("TextButton", dCard); joinClanBtn.Size = UDim2.new(0, 50, 0, 24); joinClanBtn.Position = UDim2.new(1, -60, 0.5, -12); joinClanBtn.Text = "JOIN"; joinClanBtn.Font = Enum.Font.GothamBold; joinClanBtn.TextColor3 = Colors.Light; joinClanBtn.BackgroundColor3 = Colors.Accent; joinClanBtn.BackgroundTransparency = 0.3; Instance.new("UICorner", joinClanBtn).CornerRadius = UDim.new(0, 6); joinClanBtn.ZIndex = 2
+                        if myClans[cName] then
+                            joinClanBtn.Text = "✔"; joinClanBtn.BackgroundColor3 = Colors.Darker; joinClanBtn.TextColor3 = Colors.TextDim; joinClanBtn.Interactable = false
+                        else
+                            joinClanBtn.MouseButton1Click:Connect(function()
+                                joinClanBtn.Text = "SENT"; joinClanBtn.TextColor3 = Colors.Accent; joinClanBtn.Interactable = false
+                                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. "/requests/" .. myUserId .. ".json", Method = "PUT", Body = HttpService:JSONEncode({ from = myName, uid = myUserId, timestamp = os.time() })})
+                                showNotif("🛡️ CLAN", "Request sent to " .. cName, false)
+                            end)
+                        end
+                    end
+                    
+                    if count == 0 then
+                        local emptyLbl = Instance.new("TextLabel", CUI.lbList); emptyLbl.Size = UDim2.new(1, 0, 0, 30); emptyLbl.Text = "No clans found."; emptyLbl.Font = Enum.Font.Gotham; emptyLbl.TextSize = 12; emptyLbl.TextColor3 = Colors.TextDim; emptyLbl.BackgroundTransparency = 1
+                    else CUI.lbList.CanvasSize = UDim2.new(0, 0, 0, count * 58) end
+                end
+            else
+                local emptyLbl = Instance.new("TextLabel", CUI.lbList); emptyLbl.Size = UDim2.new(1, 0, 0, 30); emptyLbl.Text = "Failed to fetch leaderboard."; emptyLbl.Font = Enum.Font.Gotham; emptyLbl.TextSize = 12; emptyLbl.TextColor3 = Colors.TextDim; emptyLbl.BackgroundTransparency = 1
+            end
+        end)
+    end)
+
+    local function invitePlayerToClan(targetUid)
+        if not reqFunc then return end
+        if activeClanChat and (myClans[activeClanChat] == "Owner" or myClans[activeClanChat] == "Admin" or myClans[activeClanChat] == "Co-Owner") then
+            local payload = { clan = activeClanChat, from = myName, timestamp = os.time() }
+            reqFunc({Url = FIREBASE_URL .. INVITE_DB_PATH .. targetUid .. "/" .. activeClanChat .. ".json", Method = "PUT", Body = HttpService:JSONEncode(payload)})
+            showNotif("🛡️ CLAN", "Invite sent to user ID: " .. targetUid, false)
+            addMessageToChat("[SYSTEM]", "Sent invite to " .. targetUid, true, nil, "Clan")
+        else
+            showNotif("⚠️ ERROR", "Only Admins/Owners can invite!")
+        end
+    end
+
+    CUI.createClanBtn.MouseButton1Click:Connect(function()
+        local popup = Instance.new("Frame", main); popup.Size = UDim2.new(1, -40, 0, 120); popup.Position = UDim2.new(0, 20, 0.5, -60); popup.BackgroundColor3 = Colors.Darker; popup.ZIndex = 200; Instance.new("UICorner", popup).CornerRadius = UDim.new(0, 12)
+        local pStroke = Instance.new("UIStroke", popup); pStroke.Color = Colors.Accent; pStroke.Thickness = 2
+        local title = Instance.new("TextLabel", popup); title.Size = UDim2.new(1, 0, 0, 30); title.Text = "CREATE CLAN"; title.Font = Enum.Font.GothamBlack; title.TextColor3 = Colors.Light; title.BackgroundTransparency = 1; title.ZIndex = 201
+        
+        local popupCloseBtn = Instance.new("TextButton", popup); popupCloseBtn.Size = UDim2.new(0, 25, 0, 25); popupCloseBtn.Position = UDim2.new(1, -30, 0, 5); popupCloseBtn.Text = "✖"; popupCloseBtn.TextColor3 = Colors.NeonPink; popupCloseBtn.Font = Enum.Font.GothamBold; popupCloseBtn.TextSize = 14; popupCloseBtn.BackgroundTransparency = 1; popupCloseBtn.ZIndex = 202
+        popupCloseBtn.MouseButton1Click:Connect(function() popup:Destroy() end)
+
+        local input = Instance.new("TextBox", popup); input.Size = UDim2.new(1, -20, 0, 30); input.Position = UDim2.new(0, 10, 0, 40); input.PlaceholderText = "Enter Clan Name..."; input.BackgroundColor3 = Colors.Dark; input.TextColor3 = Colors.Text; input.Font = Enum.Font.Gotham; input.ZIndex = 201; Instance.new("UICorner", input).CornerRadius = UDim.new(0, 6)
+        local submit = Instance.new("TextButton", popup); submit.Size = UDim2.new(0, 80, 0, 30); submit.Position = UDim2.new(0.5, -40, 0, 80); submit.Text = "CREATE"; submit.BackgroundColor3 = Colors.Secondary; submit.TextColor3 = Colors.Light; submit.Font = Enum.Font.GothamBold; submit.ZIndex = 201; Instance.new("UICorner", submit).CornerRadius = UDim.new(0, 6)
+        
+        submit.MouseButton1Click:Connect(function()
+            if not reqFunc then return end
+            local cName = input.Text:gsub("%s+", "")
+            if cName ~= "" then
+                local checkRes = reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. ".json?shallow=true", Method = "GET"})
+                if checkRes.Success and checkRes.Body ~= "null" then showNotif("⚠️ ERROR", "Clan name already exists!", true) return end
+                
+                local ownerSig = generateClanRoleSignature(cName, myUserId, "Owner")
+                
+                local guideMessage = "🛡️ CLAN CREATED: " .. cName:upper() .. "\n" ..
+                                     "[ADMIN GUIDE]: Welcome! Here are your war commands:\n" ..
+                                     "1. /target [User] -> Marks enemy in RED for all members.\n" ..
+                                     "2. /untarget -> Removes the mark.\n" ..
+                                     "3. /invite [User] -> Invites a player to join.\n" ..
+                                     "4. /disband " .. cName .. " -> Deletes this clan permanently."
+
+                local payload = { 
+                    owner = myUserId, 
+                    members = { [myUserId] = {role = "Owner", sig = ownerSig} }, 
+                    stats = { xp = 0 },
+                    messages = {
+                        ["init_msg"] = {text = "[SYSTEM] : " .. guideMessage, timestamp = os.time()}
+                    }
+                }
+                
+                reqFunc({Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. ".json", Method = "PUT", Body = HttpService:JSONEncode(payload)})
+                reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. myUserId .. "/" .. cName .. ".json", Method = "PUT", Body = HttpService:JSONEncode({role = "Owner", sig = ownerSig})})
+                myClans[cName] = "Owner"; showNotif("🛡️ SYSTEM", "Clan " .. cName .. " created!", true); refreshClanList(); popup:Destroy()
+            end
+        end)
+    end)
+
+    local notifiedInvites = {} 
+    local lastUserSyncTime = 0
+    task.spawn(function()
+        while true do
+            if reqFunc then
+                if os.time() - lastUserSyncTime > 15 then
+                    lastUserSyncTime = os.time()
+                    task.spawn(function()
+                        local syncRes = reqFunc({Url = FIREBASE_URL .. USER_CLANS_DB_PATH .. myUserId .. ".json", Method = "GET"})
+                        if syncRes.Success then
+                            local s, data = pcall(function() return HttpService:JSONDecode(syncRes.Body) end)
+                            if not s or type(data) ~= "table" then data = {} end
+                            local needsRefresh = false
+                            
+                            for cName, _ in pairs(myClans) do
+                                if not data[cName] then
+                                    myClans[cName] = nil
+                                    needsRefresh = true
+                                    showNotif("⚠️ SYSTEM", "You were removed from " .. cName, true)
+                                    if activeClanChat == cName then activeClanChat = nil; switchTab("ClanHome") end
+                                end
+                            end
+
+                            for cName, cData in pairs(data) do 
+                                if not myClans[cName] then 
+                                    myClans[cName] = cData.role or "Member"
+                                    needsRefresh = true
+                                    showNotif("🛡️ ZAYN SYSTEM", "You joined " .. cName .. "!", true) 
+                                end
+                            end
+                            
+                            if needsRefresh and currentTab == "ClanHome" then refreshClanList() end
+                        end
+                    end)
+
+                    task.spawn(function()
+                        local tRes = reqFunc({Url = FIREBASE_URL .. TITLES_DB_PATH .. ".json", Method = "GET"})
+                        if tRes.Success and tRes.Body ~= "null" then
+                            local s, parsed = pcall(function() return HttpService:JSONDecode(tRes.Body) end)
+                            if s and type(parsed) == "table" then _internalTitles = parsed end
+                        end
+                    end)
+                end
+
+                for cName, _ in pairs(myClans) do
+                    task.spawn(function()
+                        local res = reqFunc({ Url = FIREBASE_URL .. CLAN_DB_PATH .. cName .. '/messages.json?orderBy="$key"&limitToLast=5', Method = "GET" })
+                        if res.Success and res.Body ~= "null" then
+                            local s, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                            if s and type(data)=="table" then
+                                for key, msgData in pairs(data) do
+                                    if not clanProcessedIds[key] then
+                                        clanProcessedIds[key] = true
+                                        local mtext = msgData.text
+                                        
+                                        if mtext:find("%[TARGET_MARK%]") then
+                                            local tName = mtext:match("%[TARGET_MARK%] (.-)%s*||")
+                                            if tName then markTarget(tName) end
+                                            continue
+                                        elseif mtext:find("%[TARGET_REMOVE%]") then
+                                            removeTarget()
+                                            continue
+                                        end
+
+                                        local sName, sMsg, sUID, cleanName = parseMessage(mtext)
+                                        if sName and sMsg and tostring(sUID) ~= myUserId then
+                                            local isSys = (sName == "[SYSTEM]")
+                                            if currentTab == "ClanChat" and activeClanChat == cName then 
+                                                addMessageToChat(sName, sMsg, isSys, tonumber(sUID), "Clan") 
+                                            else 
+                                                if not isSys and not isInitialClanLoad then 
+                                                    showNotif("🛡️ " .. cName, cleanName .. ": " .. sMsg, false, tonumber(sUID)) 
+                                                end 
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(0.1) 
+                end
+                
+                local invRes = reqFunc({ Url = FIREBASE_URL .. INVITE_DB_PATH .. myUserId .. '.json', Method = "GET" })
+                if invRes.Success and invRes.Body ~= "null" then
+                    local s, invites = pcall(function() return HttpService:JSONDecode(invRes.Body) end)
+                    if s and type(invites)=="table" then
+                        for cName, iData in pairs(invites) do 
+                            local stamp = tostring(iData.timestamp or 0)
+                            if not notifiedInvites[cName .. stamp] then
+                                notifiedInvites[cName .. stamp] = true
+                                showNotif("📩 CLAN", "You have a new invite from " .. (iData.from or "someone") .. "!", true)
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.6)
+        end
+    end)
+
+    local function receiveMessages()
+        if isReceiving then return end; isReceiving = true
+        task.spawn(function()
+            while true do
+                pcall(function()
+                    if reqFunc then
+                        local mRes = reqFunc({Url = FIREBASE_URL .. BLACKLIST_DB_PATH .. myUserId .. ".json", Method = "GET"})
+                        if mRes.Success and mRes.Body ~= "null" then isBlacklisted = true else isBlacklisted = false end
+
+                        local res = reqFunc({ Url = FIREBASE_URL .. DB_PATH .. '.json?orderBy="$key"&limitToLast=40', Method = "GET" })
+                        if res.Success and res.Body and res.Body ~= "null" then
+                            local s, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                            if s and type(data)=="table" then
+                                for key, msgData in pairs(data) do
+                                    if not processedIds[key] then
+                                        processedIds[key] = true
+                                        local mtext = msgData.text
+                                        
+                                        local isSpoofed = false
+
+                                        if mtext:find("%[SYSTEM%]") and not mtext:find(SECURE_AUTH_KEY) and not mtext:find("KICKED") and not mtext:find("has joined") and not mtext:find("Target") then
+                                            isSpoofed = true
+                                        end
+
+                                        if not isSpoofed and not mtext:find("%[ZAYN_SYNC%]") and not mtext:find("%[CHAT_MUTE%]") and not mtext:find("%[GBAN%]") and not mtext:find("%[CLAN_UPDATE%]") and not mtext:find("%[TITLE_UPDATE%]") and not mtext:find("%[SERVER_ANN%]") and not mtext:find("%[JOIN%]") and not mtext:find("%[SYSTEM%]") then
+                                            local rawUid, msgHash, msgTs = mtext:match("||%s*(%d+)::([%w_]+)::(%d+)%s*$")
+                                            
+                                            if not msgHash then
+                                                isSpoofed = true 
+                                            else
+                                                local _, extractedMsg = parseMessage(mtext)
+                                                if extractedMsg then
+                                                    local expectedHash = generateMessageHash(rawUid, extractedMsg, msgTs)
+                                                    if expectedHash ~= msgHash then
+                                                        isSpoofed = true 
+                                                    end
+                                                end
+                                            end
+                                        end
+
+                                        if isSpoofed then
+                                            continue 
+                                        end
+                                        
+                                        if mtext:find("%[ZAYN_SYNC%]") then
+                                            local tStamp, tSig, syncUid = mtext:match("%[ZAYN_SYNC%] (%d+):(%d+)%s*||(%d+)")
+                                            if syncUid and tStamp and tSig then
+                                                if math.abs(os.time() - tonumber(tStamp)) <= 120 and tSig == generateSignature("SYNC", syncUid, tStamp) then
+                                                    if not activeScriptUsers[syncUid] then
+                                                        local strictDisplayName, strictUsername = getStrictIdentity(syncUid)
+                                                        activeScriptUsers[syncUid] = {displayName = strictDisplayName, name = strictUsername, lastSeen = os.time()}
+                                                    else
+                                                        activeScriptUsers[syncUid].lastSeen = os.time()
+                                                    end
+                                                end
+                                            end
+                                            continue
+                                        end
+
+                                        if mtext:find("%[CHAT_MUTE%]") then
+                                            local mState, senderId, syncKey = mtext:match("%[CHAT_MUTE%] (%a+) ||(%d+)_([%w_]+)")
+                                            if mState and _internalOwners[tostring(senderId)] and syncKey == SECURE_AUTH_KEY then
+                                                isChatMuted = (mState == "true")
+                                            end
+                                            continue
+                                        end
+
+                                        if mtext:find("%[GBAN%]") then
+                                            local gbanUid, senderId, syncKey = mtext:match("%[GBAN%] (%d+) ||(%d+)_([%w_]+)")
+                                            if gbanUid and _internalOwners[tostring(senderId)] and syncKey == SECURE_AUTH_KEY then
+                                                if gbanUid == myUserId then isBlacklisted = true end
+                                            end
+                                            continue
+                                        end
+
+                                        if mtext:find("%[CLAN_UPDATE%]") then
+                                            local uCName, senderId, syncKey = mtext:match("%[CLAN_UPDATE%] (.-) ||(%d+)_([%w_]+)")
+                                            if uCName and _internalOwners[tostring(senderId)] and syncKey == SECURE_AUTH_KEY then
+                                                if myClans[uCName] and currentTab == "ClanHome" then
+                                                    refreshClanList()
+                                                end
+                                            end
+                                            continue
+                                        end
+
+                                        if ignoreOldMessages then continue end
+                                        local tagUidStr = mtext:match("||%s*(%d+)")
+                                        if tagUidStr == myUserId then continue end
+
+                                        if mtext:find("%[ZAYN_DM:") then
+                                            local targetUidStr, dmServer, rawDm = mtext:match("%[ZAYN_DM:(%d+)%] %[(.-)%] (.*)")
+                                            if targetUidStr and dmServer == SERVER_ID then
+                                                local targetUid = tonumber(targetUidStr); local sName, sMsg, sUID, cleanName = parseMessage(rawDm); local senderUid = tonumber(sUID)
+                                                if targetUid == tonumber(myUserId) then
+                                                    if not dmHistories[senderUid] then dmHistories[senderUid] = {} end
+                                                    table.insert(dmHistories[senderUid], {name = cleanName, msg = sMsg, isSystem = false, uid = senderUid})
+                                                    if currentTab == "DMChat" and activeDmUserId == senderUid then addMessageToChat(cleanName, sMsg, false, senderUid, "DM") else showNotif("🔒 DM: " .. cleanName, sMsg, true, senderUid) end
+                                                end
+                                            end
+                                        elseif mtext:find("%[JOIN%]") then
+                                            local rawJoin = mtext:match("%[JOIN%] (.-)%s*||") or mtext:match("%[JOIN%] (.*)")
+                                            if rawJoin then addMessageToChat("[SYSTEM]", rawJoin, true, nil, "Server"); showNotif("[SYSTEM]", rawJoin) end
+                                        
+                                        elseif mtext:find("%[TITLE_UPDATE%]") then
+                                            local tUserId, tColor, tExpire, tTitle, tTimestamp, tSig, senderId = mtext:match("%[TITLE_UPDATE%] (%d+):(%S+):(%d+):(.-):(%d+):(%d+)%s*||(%d+)")
+                                            if tUserId and tTitle and _internalOwners[tostring(senderId)] then
+                                                local currentTime = os.time()
+                                                local msgTime = tonumber(tTimestamp) or 0
+                                                if math.abs(currentTime - msgTime) <= 120 then 
+                                                    local expectedSig = generateSignature("TITLE", tUserId, msgTime)
+                                                    if tSig == expectedSig then
+                                                        if tostring(tUserId) ~= "10432865434" then
+                                                            if tTitle == "REMOVED" then 
+                                                                _internalTitles[tUserId] = nil 
+                                                            else 
+                                                                local localTitleSig = generateTitleSignature(tUserId, tTitle, tColor)
+                                                                _internalTitles[tUserId] = {text = tTitle, color = tColor, expire = tonumber(tExpire), sig = localTitleSig} 
+                                                            end
+                                                            
+                                                            local pName, _ = getStrictIdentity(tUserId)
+                                                            if tTitle == "REMOVED" then addMessageToChat("[SYSTEM]", "✨ Owner ne '"..pName.."' ka title hata diya!", true, nil, "Server")
+                                                            else addMessageToChat("[SYSTEM]", "✨ Owner ne '"..pName.."' ko '"..tTitle.."' ("..tColor..") title diya!", true, nil, "Server") end
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                            
+                                        elseif mtext:find("%[SERVER_ANN%]") then
+                                            local annName, annMsg = mtext:match("%[SERVER_ANN%]%s*(.-):%s*(.*)")
+                                            if not annMsg then annMsg = mtext:match(": (.*)$") or mtext end
+                                            task.spawn(function() showAnnouncement(annMsg, true) end); addMessageToChat("[SYSTEM]", "[SERVER]: " .. annMsg, true, nil, "Server")
+                                        else
+                                            local sName, sMsg, sUID, cleanName = parseMessage(mtext)
+                                            if sName and sMsg then
+                                                local isSys = (sName == "[SYSTEM]")
+                                                if sUID then 
+                                                    if not activeScriptUsers[sUID] then
+                                                        local strictDisplayName, strictUsername = getStrictIdentity(sUID)
+                                                        activeScriptUsers[sUID] = {displayName = strictDisplayName, name = strictUsername, lastSeen = os.time()}
+                                                    end
+                                                end
+                                                local userId = tonumber(sUID); local targetP = userId and Players:GetPlayerByUserId(userId)
+                                                addMessageToChat(sName, sMsg, isSys, userId, "Server"); showNotif(sName, sMsg, false, userId)
+                                                if targetP and not isSys then createBubble(sName, sMsg, targetP) end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
+                task.wait(0.6)
+            end
+        end)
+    end
+
+    -- 🛡️ UI AVATAR TOGGLE WITH RGB GLOW RING
+    local toggleBtn = Instance.new("ImageButton", sg)
+    toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+    toggleBtn.Position = UDim2.new(0.02, 0, 0.5, -27)
+    toggleBtn.BackgroundColor3 = Colors.Darker
+    toggleBtn.BackgroundTransparency = 0.1
+    toggleBtn.ZIndex = 20
+    toggleBtn.AnchorPoint = Vector2.new(0, 0.5)
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(Player.UserId) .. "&w=150&h=150"
+    Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(1, 0)
+    
+    local toggleStroke = Instance.new("UIStroke", toggleBtn)
+    toggleStroke.Thickness = 2.5
+    toggleStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    local toggleGrad = Instance.new("UIGradient", toggleStroke)
+    
+    task.spawn(function()
+        local speed = 0.3
+        while toggleBtn and toggleBtn.Parent do
+            local hue = (tick() * speed) % 1
+            pcall(function() toggleGrad.Color = ColorSequence.new(Color3.fromHSV(hue, 1, 1)) end)
+            task.wait(0.05)
+        end
+    end)
+
+    local announceFrame = Instance.new("Frame", sg); announceFrame.Size = UDim2.new(0, 460, 0, 80); announceFrame.Position = UDim2.new(0.5, -230, 0, -100); announceFrame.BackgroundColor3 = Colors.Darker; announceFrame.BackgroundTransparency = 0.25; announceFrame.BorderSizePixel = 0; announceFrame.ZIndex = 500; announceFrame.ClipsDescendants = true; Instance.new("UICorner", announceFrame).CornerRadius = UDim.new(0, 16)
+    local annStroke = Instance.new("UIStroke", announceFrame); annStroke.Thickness = 1.5; annStroke.Color = Colors.Glow; annStroke.Transparency = 0.2
+    local annTitle = Instance.new("TextLabel", announceFrame); annTitle.Size = UDim2.new(1, -70, 0, 26); annTitle.Position = UDim2.new(0, 60, 0, 10); annTitle.Font = Enum.Font.GothamBlack; annTitle.TextSize = 14; annTitle.BackgroundTransparency = 1; annTitle.TextColor3 = Colors.Light; annTitle.TextXAlignment = Enum.TextXAlignment.Left; annTitle.ZIndex = 501
+    local annText = Instance.new("TextLabel", announceFrame); annText.Size = UDim2.new(1, -70, 0, 32); annText.Position = UDim2.new(0, 60, 0, 38); annText.Font = Enum.Font.Gotham; annText.TextSize = 12; annText.BackgroundTransparency = 1; annText.TextColor3 = Colors.Text; annText.TextWrapped = true; annText.TextXAlignment = Enum.TextXAlignment.Left; annText.ZIndex = 501
+
+    local function makeDraggable(frame, dragArea)
+        local dragConn, endConn, dragging, dragStart, startPos = nil, nil, false, nil, nil
+        dragArea.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true; dragStart = input.Position; startPos = frame.Position
+                if dragConn then dragConn:Disconnect() end; if endConn then endConn:Disconnect() end
+                dragConn = UserInputService.InputChanged:Connect(function(input2)
+                    if dragging and (input2.UserInputType == Enum.UserInputType.MouseMovement or input2.UserInputType == Enum.UserInputType.Touch) then
+                        local delta = input2.Position - dragStart; frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                    end
+                end)
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(input3) if input3.UserInputType == Enum.UserInputType.MouseButton1 or input3.UserInputType == Enum.UserInputType.Touch then dragging = false; if dragConn then dragConn:Disconnect() end end end)
+    end
+    makeDraggable(main, titleBar); makeDraggable(toggleBtn, toggleBtn)
+
+    local isMainVisible = true
+    local function smoothHide() if not main then return end; isMainVisible = false; safeTween(main, {Size = UDim2.new(0, 325, 0, 280), BackgroundTransparency = 1}, 0.4, Enum.EasingStyle.Sine, Enum.EasingDirection.Out).Completed:Connect(function() if not isMainVisible then main.Visible = false end end); safeTween(toggleBtn, {Rotation = 0}, 0.5, Enum.EasingStyle.Sine) end
+    local function smoothShow() if not main then return end; isMainVisible = true; main.Visible = true; main.Size = UDim2.new(0, 325, 0, 325); safeTween(main, {Size = UDim2.new(0, 355, 0, 310), BackgroundTransparency = 0.15}, 0.6, Enum.EasingStyle.Quint, Enum.EasingDirection.Out); safeTween(toggleBtn, {Rotation = 180}, 0.6, Enum.EasingStyle.Quint) end
+    toggleBtn.MouseButton1Click:Connect(function() if isMainVisible then smoothHide() else smoothShow() end end)
+    closeBtn.MouseButton1Click:Connect(function() smoothHide() end)
+
+    task.spawn(function()
+        task.wait(2)
+        if not hasSentJoin then
+            hasSentJoin = true
+            local titleData = getPlayerTitle(myUserId, myName); local titleText = titleData and titleData.text or nil
+            local joinText = ""
+            if titleText == "CREATOR" then joinText = "🌟 ["..titleText.."] " .. myName .. " HAS ARRIVED WITH A MASSIVE AURA! 🌟" elseif titleText == "VIP" then joinText = "💎 ["..titleText.."] " .. myName .. " stepped into the chat!" elseif titleText then joinText = "🔥 ["..titleText.."] " .. myName .. " joined the battle!" else joinText = "✨ " .. myName .. " joined the chat!" end
+            addMessageToChat("[SYSTEM]", joinText, true, nil, "Server"); showNotif("[SYSTEM]", joinText)
+            
+            task.wait(1)
+            addMessageToChat("[SYSTEM]", "💡: Click a player's name to DM, or Swipe Right on a message to Reply!", true, nil, "Server")
+            task.wait(1)
+            addMessageToChat("[SYSTEM]", "PREMIUM: Custom Clan Banner, Custom Title, and RGB Banner Border are paid features! DM On Discord:mickeyyy009", true, nil, "Server")
+
+            table.insert(messageQueue, {text = "["..SERVER_ID.."] [JOIN] " .. joinText .. " ||" .. myUserId, timestamp = os.time()}); processQueue()
+        end
+    end)
+    sg.Destroying:Connect(function() stopRgbAnimation() end)
+    task.spawn(function() task.wait(1.5); setRPNameAndBio() end)
+    receiveMessages()
+end)()
