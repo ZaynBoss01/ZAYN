@@ -1,10 +1,10 @@
 -- ====================================================================
--- 👑 ZAYN CHAT : THE APEX TITAN EDITION (FINAL MASTER-CORE V23.0)
+-- 👑 ZAYN CHAT : THE APEX TITAN EDITION (FINAL MASTER-CORE V24.0)
 -- DEV : iZayn | All 22+ Security Vectors Hardened & Intact
--- FIX 1 : Inescapable HWID+Username Thread-Blocking Ban Engine (Local Infection)
--- FIX 2 : Anti-Spam (5 msgs/3s) + 200 Word Limit + Anti-Repeat Engine
--- FIX 3 : ZARA AI Local Explanations for Spammers & Rule Breakers
--- FIX 4 : Stealth Admin Panel Back Button Added
+-- FIX 1 : Absolute Thread-Halt HWID Ban Engine (Crash Loop without UI load)
+-- FIX 2 : 200 Characters (Alphabets) Limit Applied.
+-- FIX 3 : Anti-Spam (5 msgs/3s) + Anti-Repeat Message Enforced.
+-- FIX 4 : ZARA AI Warnings + Admin Back Button.
 -- ====================================================================
 
 if getgenv().ZaynChat_Loaded then
@@ -13,7 +13,6 @@ if getgenv().ZaynChat_Loaded then
 	pcall(function()
 		local cgui = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or game.Players.LocalPlayer:WaitForChild("PlayerGui")
 		for _, v in pairs(cgui:GetChildren()) do if v.Name:match("^ZaynUI_") then v:Destroy() end end
-		for _, v in pairs(game.Players.LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do if v.Name:match("^ZaynUI_") then v:Destroy() end end
 	end)
 end
 getgenv().ZaynChat_Loaded = true; getgenv().ZaynChat_Unloading = false
@@ -49,22 +48,36 @@ local rawJob = (game.JobId ~= "") and game.JobId or "OFFLINE_STUDIO_TEST_99"
 local REAL_JOB_ID = rawJob:gsub("[^%w_]", "") 
 
 -- [ 🛑 ABSOLUTE THREAD-BLOCKING CLOUD BAN CHECKER (BYPASS-PROOF) ]
-local isLocallyInfected = pcall(isfile, "ZaynTitan_Ban_Signature.sys") and isfile("ZaynTitan_Ban_Signature.sys")
-local s1, b1 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json?bust="..tostring(os.clock())}).Body end)
-local s2, b2 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json?bust="..tostring(os.clock())}).Body end)
+local function ExecuteAbsoluteBanCheck()
+	local isBanned = false
+	local s1, b1 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json?bust="..tostring(os.clock())}).Body end)
+	local s2, b2 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json?bust="..tostring(os.clock())}).Body end)
+	
+	if (s1 and b1 and string.find(b1, "true")) or (s2 and b2 and string.find(b2, "true")) then isBanned = true end
+	if pcall(isfile, "ZaynTitan_Ban_Signature.sys") and isfile("ZaynTitan_Ban_Signature.sys") then isBanned = true end
 
-if b1 == "true" or b2 == "true" then
-	pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "LOCKED_BY_IZAYN") end end)
-	LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nAccount or Device Fingerprint permanently blacklisted by iZayn."); task.wait(9e9); return
-elseif isLocallyInfected then
-	pcall(function() if delfile then delfile("ZaynTitan_Ban_Signature.sys") end end) -- Unbanned from cloud, clean local infection
+	if isBanned then
+		task.spawn(function()
+			pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "LOCKED_BY_IZAYN") end end)
+			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
+			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json", Method = "PUT", Body = "true"})
+			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. LocalPlayer.Name:lower() .. ".json", Method = "PUT", Body = HttpService:JSONEncode(MY_HWID)})
+		end)
+		pcall(function()
+			local cg = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or game.Players.LocalPlayer:WaitForChild("PlayerGui")
+			for _,v in pairs(cg:GetChildren()) do if v.Name:find("Zayn") then v:Destroy() end end
+		end)
+		LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nAccount or Device Fingerprint permanently blacklisted by iZayn.")
+		while true do task.wait(9e9) end -- HALTS THREAD PERMANENTLY. SCRIPT WILL NOT EXECUTE BEYOND THIS POINT.
+	end
 end
+ExecuteAbsoluteBanCheck()
 
 -- [ 💀 HARDCODED PRE-CHECK BANLIST ]
 local ZAYN_HARDCODED_BANLIST = { UserIds = { ["baduser123"] = true }, HWIDs = { ["ADD_HWID_HERE_IF_NEEDED"] = true } }
-if ZAYN_HARDCODED_BANLIST.UserIds[LocalPlayer.Name:lower()] or ZAYN_HARDCODED_BANLIST.HWIDs[MY_HWID] then LocalPlayer:Kick("\n⛔ PERMANENT BAN ⛔\nMachine strictly blacklisted."); task.wait(9e9); return end
+if ZAYN_HARDCODED_BANLIST.UserIds[LocalPlayer.Name:lower()] or ZAYN_HARDCODED_BANLIST.HWIDs[MY_HWID] then LocalPlayer:Kick("\n⛔ PERMANENT BAN ⛔\nMachine strictly blacklisted."); while true do task.wait(9e9) end end
 
--- [ 🚨 TITANGUARD V23.0 ]
+-- [ 🚨 TITANGUARD V24.0 ]
 local TitanGuardKick = c_wrap(function(code, reason)
 	if getgenv().ZaynChat_Unloading then return end
 	task.spawn(function()
@@ -289,7 +302,15 @@ function ZaynChat.DispatchGodCommand(cmdStr)
 		task.spawn(function() httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. u .. ".json", Method = "PUT", Body = "true"}) end)
 	elseif cmdStr:sub(1, 11) == "UNBAN_USER:" then
 		local u = cmdStr:sub(12):lower()
-		task.spawn(function() httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. u .. ".json", Method = "DELETE"}) end)
+		task.spawn(function() 
+			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. u .. ".json", Method = "DELETE"}) 
+			local mapRes = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. u .. ".json?bust="..tostring(os.clock())}).Body end)
+			if mapRes and type(mapRes) == "string" and mapRes ~= "null" then
+				local hwid = mapRes:gsub('"', '')
+				httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. hwid .. ".json", Method = "DELETE"})
+			end
+			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. u .. ".json", Method = "DELETE"})
+		end)
 	elseif cmdStr:sub(1, 10) == "LOCK_CHAT:" then
 		task.spawn(function() httprequest({Url = STATIC_PROXY .. "ZaynSystemLocks_v3/" .. cmdStr:sub(11):lower() .. ".json", Method = "PUT", Body = "true"}) end)
 	elseif cmdStr:sub(1, 12) == "UNLOCK_CHAT:" then
@@ -869,10 +890,19 @@ function ZaynChat.StartPolling()
 								elseif decCmd:sub(1, 9) == "BAN_USER:" then
 									local tgt = decCmd:sub(10):lower()
 									if LocalPlayer.Name:lower() == tgt then
-										httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
-										httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. tgt .. ".json", Method = "PUT", Body = "true"})
+										task.spawn(function()
+											httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
+											httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. tgt .. ".json", Method = "PUT", Body = HttpService:JSONEncode(MY_HWID)})
+										end)
 										pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "LOCKED_BY_IZAYN") end end)
-										LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nExecuted permanently by Security Protocol."); task.wait(9e9)
+										pcall(function() local cg = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or game.Players.LocalPlayer:WaitForChild("PlayerGui") for _, v in pairs(cg:GetChildren()) do if v.Name:match("^ZaynUI_") then v:Destroy() end end end)
+										LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nExecuted permanently by Security Protocol.")
+										while true do task.wait(9e9) end
+									end
+								elseif cmdStr:sub(1, 11) == "UNBAN_USER:" then
+									local tgt = cmdStr:sub(12):lower()
+									if LocalPlayer.Name:lower() == tgt then
+										pcall(function() if delfile then delfile("ZaynTitan_Ban_Signature.sys") end end)
 									end
 								-- [ END OF GOD PACKETS ]
 
@@ -1002,9 +1032,8 @@ local function CommitMessage()
 	if txt ~= "" then 
 		
 		-- [ 🤖 ZARA VALIDATION ENGINE ]
-		local words = 0; for _ in txt:gmatch("%S+") do words = words + 1 end
-		if words > 200 then
-			ZaynChat.TriggerZaraLocal("⚠️ <b>Limit Exceeded!</b>\nYour message contains over 200 words. Please keep it short and sweet.")
+		if #txt > 200 then
+			ZaynChat.TriggerZaraLocal("⚠️ <b>Limit Exceeded!</b>\nYour message contains over 200 characters/alphabets. Please keep it short.")
 			return
 		end
 		
