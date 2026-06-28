@@ -1,10 +1,11 @@
 -- ====================================================================
--- 👑 ZAYN CHAT : THE APEX TITAN EDITION (FINAL MASTER-CORE V24.0)
+-- 👑 ZAYN CHAT : THE APEX TITAN EDITION (FINAL MASTER-CORE V25.0)
 -- DEV : iZayn | All 22+ Security Vectors Hardened & Intact
--- FIX 1 : Absolute Thread-Halt HWID Ban Engine (Crash Loop without UI load)
--- FIX 2 : 200 Characters (Alphabets) Limit Applied.
--- FIX 3 : Anti-Spam (5 msgs/3s) + Anti-Repeat Message Enforced.
--- FIX 4 : ZARA AI Warnings + Admin Back Button.
+-- UNIVERSAL : 100% Compatible with Delta, Solara, Codex, MacSploit, Fluxus
+-- FIX 1 : Auto-Burn Blacklist Engine (Promotes Kicks to Permanent Bans)
+-- FIX 2 : Absolute Thread-Halt Crash Loop (Banned users freeze instantly)
+-- FIX 3 : 200 Characters (Alphabets) Limit + Anti-Spam (5 msgs/3s)
+-- FIX 4 : ZARA AI Warnings Engine + Stealth Admin Back Button
 -- ====================================================================
 
 if getgenv().ZaynChat_Loaded then
@@ -29,14 +30,24 @@ local LocalPlayer = Players.LocalPlayer
 
 local CoreGui = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or nil
 
-local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+-- [ 🌐 UNIVERSAL EXECUTOR HTTP PIPELINE RESOLVER ]
+local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or (getgenv().request) or request
 if not httprequest then warn("ZAYN CHAT: HTTP Request pipeline missing!") return end
 
--- [ 🛡️ DYNAMIC POLYMORPHIC UI RENAMER ]
 local function GenerateRandomUIName() local s="ZaynUI_"; for _=1,12 do s=s..string.char(math.random(65,90)) end return s end
 local c_wrap = (typeof(newcclosure) == "function" and newcclosure) or function(f) return f end
-local get_hwid = (pcall(function() return getgenv().gethwid() end) and getgenv().gethwid) or (pcall(function() return gethwid() end) and gethwid) or function() return "FALLBACK_ID_" .. LocalPlayer.UserId end
-local MY_HWID = get_hwid(); local EXECUTOR_NAME = (identifyexecutor and identifyexecutor()) or "Unknown_Executor"
+
+-- [ 🛡️ BULLETPROOF MULTI-LAYER UNIVERSAL HWID GENERATOR ]
+local function GetBulletproofHWID()
+	local h = ""
+	pcall(function() h = gethwid() end)
+	if not h or h == "" then pcall(function() h = getgenv().gethwid() end) end
+	if not h or h == "" then pcall(function() h = game:GetService("RbxAnalyticsService"):GetClientId() end) end
+	if not h or h == "" then h = "FALLBACK_ID_" .. tostring(LocalPlayer.UserId) end
+	return tostring(h):gsub("[^%w_]", "")
+end
+local MY_HWID = GetBulletproofHWID()
+local EXECUTOR_NAME = (identifyexecutor and identifyexecutor()) or "Unknown_Universal_Exec"
 
 -- [ 🌐 STATIC PROXY RESOLVER ]
 local proxy_bytes = {104, 116, 116, 112, 115, 58, 47, 47, 122, 97, 121, 110, 45, 112, 114, 111, 120, 121, 46, 99, 108, 105, 112, 105, 102, 121, 105, 110, 100, 105, 97, 48, 46, 119, 111, 114, 107, 101, 114, 115, 46, 100, 101, 118, 47}
@@ -47,39 +58,47 @@ local getSrvPfx = c_wrap(function() return "ZaynSrvSec_Key_" end)
 local rawJob = (game.JobId ~= "") and game.JobId or "OFFLINE_STUDIO_TEST_99"
 local REAL_JOB_ID = rawJob:gsub("[^%w_]", "") 
 
--- [ 🛑 ABSOLUTE THREAD-BLOCKING CLOUD BAN CHECKER (BYPASS-PROOF) ]
+-- [ 🛑 ABSOLUTE THREAD-HALTING BAN ENGINE (BYPASS PROOF) ]
 local function ExecuteAbsoluteBanCheck()
+	local usrLower = LocalPlayer.Name:lower()
 	local isBanned = false
-	local s1, b1 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json?bust="..tostring(os.clock())}).Body end)
-	local s2, b2 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json?bust="..tostring(os.clock())}).Body end)
-	
-	if (s1 and b1 and string.find(b1, "true")) or (s2 and b2 and string.find(b2, "true")) then isBanned = true end
+
 	if pcall(isfile, "ZaynTitan_Ban_Signature.sys") and isfile("ZaynTitan_Ban_Signature.sys") then isBanned = true end
+
+	local s1, b1 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/Accounts/" .. usrLower .. ".json?bust="..tostring(os.clock()), Method = "GET"}).Body end)
+	local s2, b2 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/HWIDs/" .. MY_HWID .. ".json?bust="..tostring(os.clock()), Method = "GET"}).Body end)
+
+	if (s1 and b1 and string.find(b1, "true")) or (s2 and b2 and string.find(b2, "true")) then isBanned = true end
 
 	if isBanned then
 		task.spawn(function()
-			pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "LOCKED_BY_IZAYN") end end)
-			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
-			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json", Method = "PUT", Body = "true"})
-			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. LocalPlayer.Name:lower() .. ".json", Method = "PUT", Body = HttpService:JSONEncode(MY_HWID)})
+			pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "PERMA_BANNED_BY_IZAYN") end end)
+			httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
+			httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/Accounts/" .. usrLower .. ".json", Method = "PUT", Body = "true"})
 		end)
-		pcall(function()
-			local cg = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or game.Players.LocalPlayer:WaitForChild("PlayerGui")
-			for _,v in pairs(cg:GetChildren()) do if v.Name:find("Zayn") then v:Destroy() end end
-		end)
-		LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nAccount or Device Fingerprint permanently blacklisted by iZayn.")
-		while true do task.wait(9e9) end -- HALTS THREAD PERMANENTLY. SCRIPT WILL NOT EXECUTE BEYOND THIS POINT.
+		pcall(function() local cg = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui") for _,v in pairs(cg:GetChildren()) do if v.Name:find("Zayn") then v:Destroy() end end end)
+		LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nAccount or Hardware ID permanently blacklisted by iZayn.")
+		while true do task.wait(9e9) end -- FREEZES MEMORY. PREVENTS SCRIPT FROM RENDERING UI BEYOND THIS POINT.
 	end
 end
 ExecuteAbsoluteBanCheck()
 
 -- [ 💀 HARDCODED PRE-CHECK BANLIST ]
-local ZAYN_HARDCODED_BANLIST = { UserIds = { ["baduser123"] = true }, HWIDs = { ["ADD_HWID_HERE_IF_NEEDED"] = true } }
+local ZAYN_HARDCODED_BANLIST = { UserIds = { ["baduser123"] = true }, HWIDs = { ["ADD_HWID_HERE"] = true } }
 if ZAYN_HARDCODED_BANLIST.UserIds[LocalPlayer.Name:lower()] or ZAYN_HARDCODED_BANLIST.HWIDs[MY_HWID] then LocalPlayer:Kick("\n⛔ PERMANENT BAN ⛔\nMachine strictly blacklisted."); while true do task.wait(9e9) end end
 
--- [ 🚨 TITANGUARD V24.0 ]
+-- [ 🚨 TITANGUARD V25.0 (AUTO-BURNS VIOLATORS TO PERMANENT BAN) ]
 local TitanGuardKick = c_wrap(function(code, reason)
 	if getgenv().ZaynChat_Unloading then return end
+	
+	local severe_codes = { ["SPY-01"]=true, ["TRP-M01"]=true, ["TRP-W02"]=true, ["META-HOOK"]=true, ["VIP-SPOOF"]=true, ["GOD-BREACH"]=true }
+	if severe_codes[code] then
+		task.spawn(function()
+			httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
+			httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/Accounts/" .. LocalPlayer.Name:lower() .. ".json", Method = "PUT", Body = "true"})
+		end)
+	end
+
 	task.spawn(function()
 		pcall(function()
 			local logData = { PlayerName = LocalPlayer.Name, PlayerID = LocalPlayer.UserId, HWID = MY_HWID, Executor = EXECUTOR_NAME, ViolationCode = code, Reason = reason, ServerJobId = REAL_JOB_ID, Timestamp = os.time() }
@@ -181,7 +200,6 @@ local ZaynChat = {
 	PendingCommitGrace = {}, VIPList = {}, TitleRegistry = { ["erennn0779"] = "CREATOR", ["izayn"] = "CREATOR" },
 	ThrottlingFlags = { BurstCount = 0, LastWindow = os.clock() },
 	IsLocked = false, ShadowMuted = {}, MutedKeywords = {},
-	-- [ Engine specific arrays ]
 	LastSentMessage = "", MessageTimestamps = {}
 }
 
@@ -299,17 +317,11 @@ function ZaynChat.DispatchGodCommand(cmdStr)
 	
 	if cmdStr:sub(1, 9) == "BAN_USER:" then
 		local u = cmdStr:sub(10):lower()
-		task.spawn(function() httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. u .. ".json", Method = "PUT", Body = "true"}) end)
+		task.spawn(function() httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/Accounts/" .. u .. ".json", Method = "PUT", Body = "true"}) end)
 	elseif cmdStr:sub(1, 11) == "UNBAN_USER:" then
 		local u = cmdStr:sub(12):lower()
 		task.spawn(function() 
-			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. u .. ".json", Method = "DELETE"}) 
-			local mapRes = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. u .. ".json?bust="..tostring(os.clock())}).Body end)
-			if mapRes and type(mapRes) == "string" and mapRes ~= "null" then
-				local hwid = mapRes:gsub('"', '')
-				httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. hwid .. ".json", Method = "DELETE"})
-			end
-			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. u .. ".json", Method = "DELETE"})
+			httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/Accounts/" .. u .. ".json", Method = "DELETE"}) 
 		end)
 	elseif cmdStr:sub(1, 10) == "LOCK_CHAT:" then
 		task.spawn(function() httprequest({Url = STATIC_PROXY .. "ZaynSystemLocks_v3/" .. cmdStr:sub(11):lower() .. ".json", Method = "PUT", Body = "true"}) end)
@@ -344,7 +356,7 @@ function ZaynChat.SetLockState(isLocked)
 	end
 end
 
--- [ 🤖 ZARA LOCAL WARNING ENGINE ]
+-- [ 🤖 ZARA WARNING ENGINE ]
 function ZaynChat.TriggerZaraLocal(msgText)
 	local zID = "SYS_LOCAL_WARN_" .. tostring(os.clock()) .. "_" .. math.random(1000,9999)
 	local targetCache = (ZaynChat.Mode == "DM" and ZaynChat.ActiveDM) and ZaynChat.Cache.DMs[ZaynChat.ActiveDM] or ZaynChat.Cache.Server
@@ -418,12 +430,13 @@ function ZaynChat.BuildMasterUI()
 	local VaultScroll = Instance.new("ScrollingFrame", ImageTray); VaultScroll.Name = "VaultScroll"; VaultScroll.Size = UDim2.new(1,-16,1,-92); VaultScroll.Position = UDim2.new(0,8,0,88); VaultScroll.BackgroundTransparency = 1; VaultScroll.ScrollBarThickness = 2; VaultScroll.AutomaticCanvasSize = Enum.AutomaticSize.None; VaultScroll.ZIndex = 71
 	local VGrid = Instance.new("UIGridLayout", VaultScroll); VGrid.CellSize = UDim2.new(0,58,0,58); VGrid.CellPadding = UDim2.new(0,8,0,8); VGrid.HorizontalAlignment = Enum.HorizontalAlignment.Left
 
-	-- [ 👑 THE APEX STEALTH ADMIN PANEL ]
+	-- [ 👑 THE APEX STEALTH ADMIN PANEL WITH BACK BUTTON ]
 	if IsStrictAdmin() then
 		local AdminBtn = Instance.new("TextButton", Header); AdminBtn.Name = "ZaynSettingsAdmin"; AdminBtn.Size = UDim2.new(0,26,0,26); AdminBtn.Position = UDim2.new(1,-128,0.5,-13); AdminBtn.BackgroundColor3 = t.InputBg; AdminBtn.Text = "⚙️"; AdminBtn.Font = Enum.Font.GothamBold; AdminBtn.TextSize = 13; Instance.new("UICorner", AdminBtn).CornerRadius = UDim.new(0,8)
 		local AdminTray = Instance.new("Frame", MainFrame); AdminTray.Name = "ZaynAdminControlTray"; AdminTray.Size = UDim2.new(1,-20,0,290); AdminTray.Position = UDim2.new(0,10,1,-340); AdminTray.BackgroundColor3 = t.HeaderBg; AdminTray.Visible = false; AdminTray.ZIndex = 90; Instance.new("UICorner", AdminTray).CornerRadius = UDim.new(0,14); Instance.new("UIStroke", AdminTray).Color = t.Accent
 		local SearchBar = Instance.new("TextBox", AdminTray); SearchBar.Size = UDim2.new(1,-50,0,32); SearchBar.Position = UDim2.new(0,8,0,8); SearchBar.BackgroundColor3 = t.InputBg; SearchBar.TextColor3 = t.TextColor; SearchBar.Font = Enum.Font.GothamMedium; SearchBar.TextSize = 11; SearchBar.PlaceholderText = "Search User OR Keyword..."; SearchBar.PlaceholderColor3 = t.SubText; SearchBar.TextXAlignment = Enum.TextXAlignment.Left; SearchBar.ClearTextOnFocus = false; SearchBar.ZIndex = 91; Instance.new("UICorner", SearchBar).CornerRadius = UDim.new(0,6); Instance.new("UIPadding", SearchBar).PaddingLeft = UDim.new(0,8)
 		
+		-- [ 🔙 BACK BUTTON FOR PANEL ]
 		local AdminCloseBtn = Instance.new("TextButton", AdminTray); AdminCloseBtn.Size = UDim2.new(0,32,0,32); AdminCloseBtn.Position = UDim2.new(1,-40,0,8); AdminCloseBtn.BackgroundColor3 = Color3.fromRGB(45,35,40); AdminCloseBtn.Text = "❌"; AdminCloseBtn.Font = Enum.Font.GothamBold; AdminCloseBtn.TextSize = 12; AdminCloseBtn.ZIndex = 92; Instance.new("UICorner", AdminCloseBtn).CornerRadius = UDim.new(0,6)
 		AdminCloseBtn.MouseButton1Click:Connect(function() AdminTray.Visible = false end)
 
@@ -874,7 +887,6 @@ function ZaynChat.StartPolling()
 								if decCmd:sub(1, 12) == "GRANT_TITLE:" then local uName, tStr = decCmd:sub(13):match("^(.-):(.+)$"); if uName and tStr then ZaynChat.TitleRegistry[uName:lower()] = tStr; ZaynChat.LiveSyncAllVisibleBubblesTitle() end
 								elseif decCmd:sub(1, 13) == "REVOKE_TITLE:" then ZaynChat.TitleRegistry[decCmd:sub(14):lower()] = nil; ZaynChat.LiveSyncAllVisibleBubblesTitle()
 								
-								-- [ 👑 THE APEX GOD COMMAND INTERCEPTOR ]
 								elseif decCmd:sub(1, 10) == "LOCK_CHAT:" then
 									local target = decCmd:sub(11):lower()
 									if LocalPlayer.Name:lower() == target then ZaynChat.SetLockState(true); ZaynChat.TriggerToast("🔒 SYSTEM DISCIPLINE", "Your chat privileges were suspended by Admin.", false) end
@@ -891,21 +903,14 @@ function ZaynChat.StartPolling()
 									local tgt = decCmd:sub(10):lower()
 									if LocalPlayer.Name:lower() == tgt then
 										task.spawn(function()
-											httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
-											httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Mapping/" .. tgt .. ".json", Method = "PUT", Body = HttpService:JSONEncode(MY_HWID)})
+											httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
+											httprequest({Url = STATIC_PROXY .. "ZaynMasterFinal/Blacklist/Accounts/" .. tgt .. ".json", Method = "PUT", Body = "true"})
 										end)
-										pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "LOCKED_BY_IZAYN") end end)
-										pcall(function() local cg = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or game.Players.LocalPlayer:WaitForChild("PlayerGui") for _, v in pairs(cg:GetChildren()) do if v.Name:match("^ZaynUI_") then v:Destroy() end end end)
+										pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "PERMA_BANNED_BY_IZAYN") end end)
+										pcall(function() local cg = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui") for _,v in pairs(cg:GetChildren()) do if v.Name:find("Zayn") then v:Destroy() end end end)
 										LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nExecuted permanently by Security Protocol.")
 										while true do task.wait(9e9) end
 									end
-								elseif cmdStr:sub(1, 11) == "UNBAN_USER:" then
-									local tgt = cmdStr:sub(12):lower()
-									if LocalPlayer.Name:lower() == tgt then
-										pcall(function() if delfile then delfile("ZaynTitan_Ban_Signature.sys") end end)
-									end
-								-- [ END OF GOD PACKETS ]
-
 								else local cmd, tu = decCmd:match("^(.-):(.+)$"); if cmd == "GRANT_VIP" and tu then ZaynChat.VIPList[tu:lower()] = true; ZaynChat.LiveSyncAllVisibleBubblesVIP() elseif cmd == "REVOKE_VIP" and tu then ZaynChat.VIPList[tu:lower()] = nil; ZaynChat.LiveSyncAllVisibleBubblesVIP() end end
 							end
 						end
@@ -921,14 +926,12 @@ function ZaynChat.StartPolling()
 							local isKnown = (ZaynChat.SeenIDs[msg_id] ~= nil); ZaynChat.SeenIDs[msg_id] = pkt.sign
 							if pkt.s and pkt.u then ZaynChat.RegisterAccount(pkt.s, nil, pkt.u) end
 							
-							-- [ 👻 SHADOW MUTE FILTER ENGINE ]
 							if ZaynChat.ShadowMuted[pkt.s:lower()] and pkt.s:lower() ~= LocalPlayer.Name:lower() then continue end
 
 							local plain = SecureDecrypt(getSrvPfx() .. REAL_JOB_ID, pkt.m, pkt.sign)
 							if plain then
 								local isEdt = (plain:sub(1,5) == "[EDT]"); local trueText = isEdt and plain:sub(6) or plain
 								
-								-- [ 🔇 KEYWORD CENSORSHIP ENGINE ]
 								local isKeywordMuted = false
 								for kw, _ in pairs(ZaynChat.MutedKeywords) do if string.find(string.lower(trueText), kw) then isKeywordMuted = true; break end end
 								if isKeywordMuted and pkt.s:lower() ~= LocalPlayer.Name:lower() then continue end
@@ -1031,9 +1034,9 @@ local function CommitMessage()
 	local txt = ZaynChat.UI.TextBox.Text
 	if txt ~= "" then 
 		
-		-- [ 🤖 ZARA VALIDATION ENGINE ]
+		-- [ STRICT 200 ALPHABETS / CHARACTERS LIMIT ENFORCER ]
 		if #txt > 200 then
-			ZaynChat.TriggerZaraLocal("⚠️ <b>Limit Exceeded!</b>\nYour message contains over 200 characters/alphabets. Please keep it short.")
+			ZaynChat.TriggerZaraLocal("⚠️ <b>Limit Exceeded!</b>\nYour message contains over 200 alphabets/characters. Keep it short!")
 			return
 		end
 		
