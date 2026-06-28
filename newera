@@ -1,10 +1,10 @@
 -- ====================================================================
--- 👑 ZAYN CHAT : THE APEX TITAN EDITION (FINAL MASTER-CORE V22.0)
+-- 👑 ZAYN CHAT : THE APEX TITAN EDITION (FINAL MASTER-CORE V23.0)
 -- DEV : iZayn | All 22+ Security Vectors Hardened & Intact
--- FIX 1 : 100% Re-Execute / UI-Hijack Kicks completely patched.
--- FIX 2 : Absolute HWID + UserID Pre-execution Banlist (Unbypassable)
--- FIX 3 : Physical Chat Lock (TextBox permanent lock across re-executes)
--- FIX 4 : Global Keyword Shadow Mute (Censorship Engine)
+-- FIX 1 : Inescapable HWID+Username Thread-Blocking Ban Engine (Local Infection)
+-- FIX 2 : Anti-Spam (5 msgs/3s) + 200 Word Limit + Anti-Repeat Engine
+-- FIX 3 : ZARA AI Local Explanations for Spammers & Rule Breakers
+-- FIX 4 : Stealth Admin Panel Back Button Added
 -- ====================================================================
 
 if getgenv().ZaynChat_Loaded then
@@ -39,14 +39,6 @@ local c_wrap = (typeof(newcclosure) == "function" and newcclosure) or function(f
 local get_hwid = (pcall(function() return getgenv().gethwid() end) and getgenv().gethwid) or (pcall(function() return gethwid() end) and gethwid) or function() return "FALLBACK_ID_" .. LocalPlayer.UserId end
 local MY_HWID = get_hwid(); local EXECUTOR_NAME = (identifyexecutor and identifyexecutor()) or "Unknown_Executor"
 
--- [ 💀 HARDCODED PRE-CHECK BANLIST ]
--- Waha tu strictly names ya hwids dal sakta hai jinko permanently block rakhna hai.
-local ZAYN_HARDCODED_BANLIST = {
-	UserIds = { ["baduser123"] = true, ["scammerboy"] = true },
-	HWIDs = { ["ADD_HWID_HERE_IF_NEEDED"] = true }
-}
-if ZAYN_HARDCODED_BANLIST.UserIds[LocalPlayer.Name:lower()] or ZAYN_HARDCODED_BANLIST.HWIDs[MY_HWID] then LocalPlayer:Kick("\n⛔ PERMANENT BAN ⛔\nMachine or Account is strictly blacklisted by iZayn."); task.wait(9e9) end
-
 -- [ 🌐 STATIC PROXY RESOLVER ]
 local proxy_bytes = {104, 116, 116, 112, 115, 58, 47, 47, 122, 97, 121, 110, 45, 112, 114, 111, 120, 121, 46, 99, 108, 105, 112, 105, 102, 121, 105, 110, 100, 105, 97, 48, 46, 119, 111, 114, 107, 101, 114, 115, 46, 100, 101, 118, 47}
 local STATIC_PROXY = ""
@@ -56,7 +48,23 @@ local getSrvPfx = c_wrap(function() return "ZaynSrvSec_Key_" end)
 local rawJob = (game.JobId ~= "") and game.JobId or "OFFLINE_STUDIO_TEST_99"
 local REAL_JOB_ID = rawJob:gsub("[^%w_]", "") 
 
--- [ 🚨 TITANGUARD V22.0 ]
+-- [ 🛑 ABSOLUTE THREAD-BLOCKING CLOUD BAN CHECKER (BYPASS-PROOF) ]
+local isLocallyInfected = pcall(isfile, "ZaynTitan_Ban_Signature.sys") and isfile("ZaynTitan_Ban_Signature.sys")
+local s1, b1 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json?bust="..tostring(os.clock())}).Body end)
+local s2, b2 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json?bust="..tostring(os.clock())}).Body end)
+
+if b1 == "true" or b2 == "true" then
+	pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "LOCKED_BY_IZAYN") end end)
+	LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nAccount or Device Fingerprint permanently blacklisted by iZayn."); task.wait(9e9); return
+elseif isLocallyInfected then
+	pcall(function() if delfile then delfile("ZaynTitan_Ban_Signature.sys") end end) -- Unbanned from cloud, clean local infection
+end
+
+-- [ 💀 HARDCODED PRE-CHECK BANLIST ]
+local ZAYN_HARDCODED_BANLIST = { UserIds = { ["baduser123"] = true }, HWIDs = { ["ADD_HWID_HERE_IF_NEEDED"] = true } }
+if ZAYN_HARDCODED_BANLIST.UserIds[LocalPlayer.Name:lower()] or ZAYN_HARDCODED_BANLIST.HWIDs[MY_HWID] then LocalPlayer:Kick("\n⛔ PERMANENT BAN ⛔\nMachine strictly blacklisted."); task.wait(9e9); return end
+
+-- [ 🚨 TITANGUARD V23.0 ]
 local TitanGuardKick = c_wrap(function(code, reason)
 	if getgenv().ZaynChat_Unloading then return end
 	task.spawn(function()
@@ -67,20 +75,6 @@ local TitanGuardKick = c_wrap(function(code, reason)
 	end)
 	task.wait(0.5); LocalPlayer:Kick("\n🛡️ ZAYN TITANGUARD 🛡️\nIntercepted Violation: [" .. code .. "]\nSession securely closed."); task.wait(9e9)
 end)
-
--- [ 🛑 ABSOLUTE CLOUD BAN CHECKER (EXECUTES BEFORE UI LOAD) ]
-local function ExecuteAbsoluteBanCheck()
-	local s1, b1 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json?bust="..tostring(os.clock())}).Body end)
-	local s2, b2 = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json?bust="..tostring(os.clock())}).Body end)
-	if (s1 and b1 == "true") or (s2 and b2 == "true") then
-		task.spawn(function()
-			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. LocalPlayer.Name:lower() .. ".json", Method = "PUT", Body = "true"})
-			httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
-		end)
-		LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nAccount or Device Fingerprint permanently blacklisted by iZayn."); task.wait(9e9)
-	end
-end
-ExecuteAbsoluteBanCheck()
 
 local IsStrictAdmin = c_wrap(function()
 	local rp = Players.LocalPlayer; return (rp.UserId == 10432865434) and (string.lower(rp.Name) == "erennn0779") and (Players:GetPlayerByUserId(10432865434) == rp)
@@ -173,7 +167,9 @@ local ZaynChat = {
 	AccountRegistry = {}, MuteServerToasts = false, UI = {}, LastSendTime = 0,
 	PendingCommitGrace = {}, VIPList = {}, TitleRegistry = { ["erennn0779"] = "CREATOR", ["izayn"] = "CREATOR" },
 	ThrottlingFlags = { BurstCount = 0, LastWindow = os.clock() },
-	IsLocked = false, ShadowMuted = {}, MutedKeywords = {}
+	IsLocked = false, ShadowMuted = {}, MutedKeywords = {},
+	-- [ Engine specific arrays ]
+	LastSentMessage = "", MessageTimestamps = {}
 }
 
 local function ExecuteWebPush(url, payload)
@@ -327,6 +323,15 @@ function ZaynChat.SetLockState(isLocked)
 	end
 end
 
+-- [ 🤖 ZARA LOCAL WARNING ENGINE ]
+function ZaynChat.TriggerZaraLocal(msgText)
+	local zID = "SYS_LOCAL_WARN_" .. tostring(os.clock()) .. "_" .. math.random(1000,9999)
+	local targetCache = (ZaynChat.Mode == "DM" and ZaynChat.ActiveDM) and ZaynChat.Cache.DMs[ZaynChat.ActiveDM] or ZaynChat.Cache.Server
+	table.insert(targetCache, {Sender="ZARA", UserID=0, Msg=msgText, Time=os.time(), ID=zID, Edited=false})
+	ZaynChat.RenderBubble("ZARA", 0, msgText, os.time(), zID, false)
+	ZaynChat.HandleScroll(true)
+end
+
 task.spawn(function()
 	local s, b = pcall(function() return httprequest({Url = STATIC_PROXY .. "ZaynSystemLocks_v3/" .. LocalPlayer.Name:lower() .. ".json?bust="..tostring(os.clock())}).Body end)
 	if s and b == "true" then ZaynChat.SetLockState(true) end
@@ -396,8 +401,11 @@ function ZaynChat.BuildMasterUI()
 	if IsStrictAdmin() then
 		local AdminBtn = Instance.new("TextButton", Header); AdminBtn.Name = "ZaynSettingsAdmin"; AdminBtn.Size = UDim2.new(0,26,0,26); AdminBtn.Position = UDim2.new(1,-128,0.5,-13); AdminBtn.BackgroundColor3 = t.InputBg; AdminBtn.Text = "⚙️"; AdminBtn.Font = Enum.Font.GothamBold; AdminBtn.TextSize = 13; Instance.new("UICorner", AdminBtn).CornerRadius = UDim.new(0,8)
 		local AdminTray = Instance.new("Frame", MainFrame); AdminTray.Name = "ZaynAdminControlTray"; AdminTray.Size = UDim2.new(1,-20,0,290); AdminTray.Position = UDim2.new(0,10,1,-340); AdminTray.BackgroundColor3 = t.HeaderBg; AdminTray.Visible = false; AdminTray.ZIndex = 90; Instance.new("UICorner", AdminTray).CornerRadius = UDim.new(0,14); Instance.new("UIStroke", AdminTray).Color = t.Accent
-		local SearchBar = Instance.new("TextBox", AdminTray); SearchBar.Size = UDim2.new(1,-16,0,32); SearchBar.Position = UDim2.new(0,8,0,8); SearchBar.BackgroundColor3 = t.InputBg; SearchBar.TextColor3 = t.TextColor; SearchBar.Font = Enum.Font.GothamMedium; SearchBar.TextSize = 11; SearchBar.PlaceholderText = "Search User OR Type Keyword to Mute..."; SearchBar.PlaceholderColor3 = t.SubText; SearchBar.TextXAlignment = Enum.TextXAlignment.Left; SearchBar.ClearTextOnFocus = false; SearchBar.ZIndex = 91; Instance.new("UICorner", SearchBar).CornerRadius = UDim.new(0,6); Instance.new("UIPadding", SearchBar).PaddingLeft = UDim.new(0,8)
+		local SearchBar = Instance.new("TextBox", AdminTray); SearchBar.Size = UDim2.new(1,-50,0,32); SearchBar.Position = UDim2.new(0,8,0,8); SearchBar.BackgroundColor3 = t.InputBg; SearchBar.TextColor3 = t.TextColor; SearchBar.Font = Enum.Font.GothamMedium; SearchBar.TextSize = 11; SearchBar.PlaceholderText = "Search User OR Keyword..."; SearchBar.PlaceholderColor3 = t.SubText; SearchBar.TextXAlignment = Enum.TextXAlignment.Left; SearchBar.ClearTextOnFocus = false; SearchBar.ZIndex = 91; Instance.new("UICorner", SearchBar).CornerRadius = UDim.new(0,6); Instance.new("UIPadding", SearchBar).PaddingLeft = UDim.new(0,8)
 		
+		local AdminCloseBtn = Instance.new("TextButton", AdminTray); AdminCloseBtn.Size = UDim2.new(0,32,0,32); AdminCloseBtn.Position = UDim2.new(1,-40,0,8); AdminCloseBtn.BackgroundColor3 = Color3.fromRGB(45,35,40); AdminCloseBtn.Text = "❌"; AdminCloseBtn.Font = Enum.Font.GothamBold; AdminCloseBtn.TextSize = 12; AdminCloseBtn.ZIndex = 92; Instance.new("UICorner", AdminCloseBtn).CornerRadius = UDim.new(0,6)
+		AdminCloseBtn.MouseButton1Click:Connect(function() AdminTray.Visible = false end)
+
 		local kwBar = Instance.new("Frame", AdminTray); kwBar.Size = UDim2.new(1,-16,0,30); kwBar.Position = UDim2.new(0,8,0,46); kwBar.BackgroundTransparency = 1; kwBar.ZIndex = 91
 		local mBtn = Instance.new("TextButton", kwBar); mBtn.Size = UDim2.new(0.48,0,1,0); mBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40); mBtn.Text = "🔇 MUTE KEYWORD"; mBtn.Font = Enum.Font.GothamBold; mBtn.TextSize = 10; mBtn.TextColor3 = Color3.fromRGB(255,255,255); mBtn.ZIndex = 92; Instance.new("UICorner", mBtn).CornerRadius = UDim.new(0,6)
 		local umBtn = Instance.new("TextButton", kwBar); umBtn.Size = UDim2.new(0.48,0,1,0); umBtn.Position = UDim2.new(0.52,0,0,0); umBtn.BackgroundColor3 = Color3.fromRGB(40, 150, 80); umBtn.Text = "🔊 UNMUTE KEYWORD"; umBtn.Font = Enum.Font.GothamBold; umBtn.TextSize = 10; umBtn.TextColor3 = Color3.fromRGB(255,255,255); umBtn.ZIndex = 92; Instance.new("UICorner", umBtn).CornerRadius = UDim.new(0,6)
@@ -507,7 +515,7 @@ function ZaynChat.RenderInboxCard(displayName, realUsername, partnerDbKey, lastM
 	local Card = Instance.new("TextButton", ZaynChat.UI.Scroll); Card.Name = "DM_Card_" .. partnerDbKey; Card.Size = UDim2.new(1,0,0,48); Card.BackgroundColor3 = t.OtherBubble; Card.BackgroundTransparency = t.BubOtherTrans; Card.Text = ""; Instance.new("UICorner", Card).CornerRadius = UDim.new(0,12)
 	local DP = Instance.new("ImageLabel", Card); DP.Size = UDim2.new(0,34,0,34); DP.Position = UDim2.new(0,7,0,7); DP.BackgroundTransparency = 1; loadDP(DP, realUsername); Instance.new("UICorner", DP).CornerRadius = UDim.new(1,0)
 	local NameL = Instance.new("TextLabel", Card); NameL.Name = "CardName"; NameL.Size = UDim2.new(1,-60,0,18); NameL.Position = UDim2.new(0,50,0,5); NameL.BackgroundTransparency = 1; NameL.Font = Enum.Font.GothamBold; NameL.TextSize = 13; NameL.TextColor3 = t.TextColor; NameL.TextXAlignment = Enum.TextXAlignment.Left; NameL.Text = displayName .. " (@" .. realUsername .. ")"
-	local SnipL = Instance.new("TextLabel", Card); SnipL.Name = "Sub"; SnipL.Size = UDim2.new(1,-60,0,16); SnipL.Position = UDim2.new(0,50,0,25); SnipL.BackgroundTransparency = 1; SnipL.Font = Enum.Font.GothamMedium; SnipL.TextSize = 11; SnipL.TextColor3 = t.SubText; SnipL.TextXAlignment = Enum.TextXAlignment.Left
+	local SnipL = Instance.new("TextLabel", Card); SnipL.Name = "Sub"; SnipL.Size = UDim2.new(1,-60,0,16); SnipL.Position = UDim2.new(0,50,0,25); BackgroundTransparency = 1; SnipL.Font = Enum.Font.GothamMedium; SnipL.TextSize = 11; SnipL.TextColor3 = t.SubText; SnipL.TextXAlignment = Enum.TextXAlignment.Left
 	Card.MouseButton1Click:Connect(function() ZaynChat.SwitchMode("DM", partnerDbKey) end)
 	ZaynChat.DressInboxCard(Card, partnerDbKey, lastMsgSnippet, ZaynChat.GetUnreadCount(partnerDbKey))
 end
@@ -766,8 +774,6 @@ function ZaynChat.Send(txt)
 	if ZaynChat.IsLocked then return end
 	local myLower = LocalPlayer.Name:lower()
 
-	local curTime = os.clock(); if curTime - ZaynChat.LastSendTime < 0.8 then ZaynChat.TriggerToast("⚠️ Spam Prevention", "Please wait.", false) return end
-	ZaynChat.LastSendTime = curTime
 	if ZaynChat.ReplyingTo then txt = string.format("[RPL::%s::%s::RPL] %s", ZaynChat.ReplyingTo.Username, ZaynChat.ReplyingTo.Text, txt) end
 	local function isImgUrl(s) local l=s:lower() return l:match("^https?://.+") and (l:find("%.png") or l:find("%.jpg") or l:find("%.jpeg") or l:find("%.webp") or l:find("%.gif")) end
 	if isImgUrl(txt) and not txt:match("^%[MEDIA::") then txt = "[MEDIA::" .. txt .. "::MEDIA]" end
@@ -865,6 +871,7 @@ function ZaynChat.StartPolling()
 									if LocalPlayer.Name:lower() == tgt then
 										httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/HWIDs/" .. MY_HWID .. ".json", Method = "PUT", Body = "true"})
 										httprequest({Url = STATIC_PROXY .. "ZaynSystemBans_v3/Users/" .. tgt .. ".json", Method = "PUT", Body = "true"})
+										pcall(function() if writefile then writefile("ZaynTitan_Ban_Signature.sys", "LOCKED_BY_IZAYN") end end)
 										LocalPlayer:Kick("\n⛔ APEX TITAN BAN ENGINE ⛔\nExecuted permanently by Security Protocol."); task.wait(9e9)
 									end
 								-- [ END OF GOD PACKETS ]
@@ -893,9 +900,7 @@ function ZaynChat.StartPolling()
 								
 								-- [ 🔇 KEYWORD CENSORSHIP ENGINE ]
 								local isKeywordMuted = false
-								for kw, _ in pairs(ZaynChat.MutedKeywords) do
-									if string.find(string.lower(trueText), kw) then isKeywordMuted = true; break end
-								end
+								for kw, _ in pairs(ZaynChat.MutedKeywords) do if string.find(string.lower(trueText), kw) then isKeywordMuted = true; break end end
 								if isKeywordMuted and pkt.s:lower() ~= LocalPlayer.Name:lower() then continue end
 
 								if isKnown then 
@@ -995,7 +1000,34 @@ local function CommitMessage()
 	if ZaynChat.IsLocked then return end
 	local txt = ZaynChat.UI.TextBox.Text
 	if txt ~= "" then 
+		
+		-- [ 🤖 ZARA VALIDATION ENGINE ]
+		local words = 0; for _ in txt:gmatch("%S+") do words = words + 1 end
+		if words > 200 then
+			ZaynChat.TriggerZaraLocal("⚠️ <b>Limit Exceeded!</b>\nYour message contains over 200 words. Please keep it short and sweet.")
+			return
+		end
+		
+		if string.lower(txt) == string.lower(ZaynChat.LastSentMessage) then
+			ZaynChat.TriggerZaraLocal("⚠️ <b>Spam Alert!</b>\nYou cannot send the exact same message repeatedly.")
+			return
+		end
+		
+		local nowTime = os.clock()
+		local recent = {}
+		for _, t in ipairs(ZaynChat.MessageTimestamps) do
+			if nowTime - t <= 3.0 then table.insert(recent, t) end
+		end
+		ZaynChat.MessageTimestamps = recent
+		if #ZaynChat.MessageTimestamps >= 5 then
+			ZaynChat.TriggerZaraLocal("⚠️ <b>Spam Blocked!</b>\nYou are typing too fast! (Limit: 5 messages per 3 seconds)")
+			return
+		end
+
 		ZaynChat.UI.TextBox.Text = ""
+		ZaynChat.LastSentMessage = txt
+		table.insert(ZaynChat.MessageTimestamps, os.clock())
+
 		local vipTarget = txt:match("^/vip%s+(.+)$"); local unvipTarget = txt:match("^/unvip%s+(.+)$"); local titleUser, titleText = txt:match("^/title%s+(@?%S+)%s+(.+)$"); local untitleUser = txt:match("^/untitle%s+(@?%S+)$")
 		if vipTarget or unvipTarget or titleUser or untitleUser then
 			ZaynChat.CancelActionBar()
